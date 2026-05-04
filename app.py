@@ -365,7 +365,7 @@ def load_clean_ui_light():
     <style>
     :root{
       /* Light theme tokens */
-      --bg: #f7f8fb;
+      --bg: #ffffff;
       --panel: #ffffff;
       --panel-2: #fafafa;
       --text: #0f172a;
@@ -396,16 +396,16 @@ def load_clean_ui_light():
       color: var(--text);
       font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto;
     }
-        /* Center the main block and keep consistent width to match design mock */
-        .block-container{ padding-top: 8px; max-width:1180px; margin-left:auto; margin-right:auto; }
-        /* Responsive expansion for very wide screens */
-        @media (min-width: 1400px) {
-            .block-container{ max-width:1320px; }
-            .p2p-header{ max-width:1320px; }
-        }
-        @media (min-width: 1600px) {
-            .block-container{ max-width:1480px; }
-            .p2p-header{ max-width:1480px; }
+    .stApp{
+      background: var(--bg) !important;
+    }
+        /* Keep app content centered at 80% of viewport width */
+        .block-container{
+          padding-top: 8px;
+          width: 80vw;
+          max-width: 80vw;
+          margin-left: auto;
+          margin-right: auto;
         }
 
     /* Branding bar (sticky) */
@@ -468,6 +468,22 @@ def load_clean_ui_light():
 
     /* Controls row */
     .ctrl-label{ color: var(--text-subtle); font-size: 12px; font-weight: 700; margin-bottom: 4px; }
+    /* Multiselect selected chips: use blue instead of default red */
+    div[data-testid="stMultiSelect"] [data-baseweb="tag"]{
+      background: #1e40af !important;
+      border: 1px solid #1e3a8a !important;
+      color: #ffffff !important;
+    }
+    div[data-testid="stMultiSelect"] [data-baseweb="tag"] span{
+      color: #ffffff !important;
+    }
+    div[data-testid="stMultiSelect"] [data-baseweb="tag"] svg{
+      fill: #ffffff !important;
+      color: #ffffff !important;
+    }
+    div[data-testid="stMultiSelect"] [data-baseweb="tag"] [role="button"]{
+      color: #ffffff !important;
+    }
 
     /* Tabs */
     .stTabs [data-baseweb="tab-list"]{
@@ -630,7 +646,7 @@ def load_clean_ui_light():
     .stColumns { gap: 12px !important; }
     .stContainer { padding: 10px 0 !important; }
     .kpi{ min-height:98px; padding:12px; }
-    .p2p-header{ max-width:1180px; margin-left:auto; margin-right:auto; }
+    .p2p-header{ width:80vw; max-width:80vw; margin-left:auto; margin-right:auto; }
 
     /* ========== GENIE PAGE STYLES ========== */
 
@@ -4252,7 +4268,7 @@ if st.session_state.current_page == "Dashboard":
                 st.info("No features by product type data available")
 
 # ============== GENIE PAGE (match another_app_for _bg.py exactly) ==============
-elif st.session_state.current_page in ("Genie", "AI Agents"):
+elif st.session_state.current_page == "Genie":
 
     def _cortex_complete_prescriptive_from_dfs(dfs, question, context_text=""):
         """Call Cortex to generate prescriptive from a list of dataframes."""
@@ -5334,6 +5350,127 @@ elif st.session_state.current_page in ("Genie", "AI Agents"):
                 st.rerun()
 
 
+# ================= AI AGENTS PAGE =================
+elif st.session_state.current_page == "AI Agents":
+    st.markdown("""
+    <style>
+    .ai-banner{
+      border-radius:14px;
+      padding:28px 24px 18px 24px;
+      background:linear-gradient(135deg,#1d4ed8 0%, #4f46e5 100%);
+      color:#fff;
+      margin:6px 0 14px 0;
+      box-shadow:0 8px 24px rgba(37,99,235,.18);
+    }
+    .ai-banner-title{
+      font-size:40px;
+      font-weight:900;
+      line-height:1.05;
+      margin:0 0 10px 0;
+      letter-spacing:.2px;
+    }
+    .ai-banner-sub{
+      font-size:14px;
+      opacity:.95;
+      margin:0;
+    }
+    .ai-meta{
+      color:#64748b;
+      font-size:13px;
+      font-weight:600;
+      margin:8px 0 14px 0;
+    }
+    .ai-card{
+      background:#fff;
+      border:1.5px solid #e5e7eb;
+      border-radius:14px;
+      padding:16px 16px 14px 16px;
+      height:260px;
+      box-shadow:0 2px 8px rgba(2,8,23,.04);
+      display:flex;
+      flex-direction:column;
+    }
+    .ai-icon{
+      width:38px;height:38px;border-radius:10px;
+      display:flex;align-items:center;justify-content:center;
+      margin-bottom:12px;color:#fff;font-size:18px;font-weight:900;
+    }
+    .ai-icon-drop{ background:linear-gradient(135deg,#2563eb,#06b6d4); }
+    .ai-icon-velocity{ background:linear-gradient(135deg,#7c3aed,#4f46e5); }
+    .ai-icon-smart{ background:linear-gradient(135deg,#0ea5e9,#14b8a6); }
+    .ai-card-title{ font-size:30px; font-weight:900; color:#0f172a; margin:0 0 10px 0; line-height:1.05; }
+    .ai-card-desc{ font-size:14px; color:#475569; line-height:1.55; margin:0; }
+    .ai-card-desc{
+      display:-webkit-box;
+      -webkit-line-clamp:6;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="ai-banner">
+      <div class="ai-banner-title">AI Agents</div>
+      <p class="ai-banner-sub">
+        Autonomous multi-step workflows that analyse your order data, diagnose issues, optimise fulfillment routing,
+        generate AI action plans and produce exportable reports - all in one click.
+      </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown(
+        '<div class="ai-meta">Data available: 2024-01-01 -> 2026-02-11 | 60 dealers | 10,000 orders</div>',
+        unsafe_allow_html=True
+    )
+
+    c1, c2, c3 = st.columns(3, gap="medium")
+    with c1:
+        st.markdown("""
+        <div class="ai-card">
+          <div class="ai-icon ai-icon-drop">🔎</div>
+          <div class="ai-card-title">Order Drop-Off Agent</div>
+          <p class="ai-card-desc">
+            Finds every stuck ORDER ID in your pipeline right now. Shows exactly how many days each order has been sitting at
+            the same status, detects SLA breaches using expected vs actual delivery dates, and generates a per-order action list
+            your ops team can act on directly.
+          </p>
+        </div>
+        """, unsafe_allow_html=True)
+        st.button("Launch Order Drop-Off Agent",
+                  use_container_width=True, key="btn_launch_dropoff")
+
+    with c2:
+        st.markdown("""
+        <div class="ai-card">
+          <div class="ai-icon ai-icon-velocity">🧭</div>
+          <div class="ai-card-title">Order Velocity Agent</div>
+          <p class="ai-card-desc">
+            Finds specific dealer-product combinations that are overdue for reorder right now - based on each dealer's own
+            historical reorder cycle. Generates a proactive outreach task list with channel, message hook and urgency - before
+            revenue is lost.
+          </p>
+        </div>
+        """, unsafe_allow_html=True)
+        st.button("Launch Order Velocity Agent",
+                  use_container_width=True, key="btn_launch_velocity")
+
+    with c3:
+        st.markdown("""
+        <div class="ai-card">
+          <div class="ai-icon ai-icon-smart">🚚</div>
+          <div class="ai-card-title">Smart Fulfillment Agent</div>
+          <p class="ai-card-desc">
+            Optimises order routing across your warehouses, dark stores and retail outlets. For any product going to any region,
+            finds the fastest node (Speed mode) or the cheapest node (Cost mode) with full stock check, carrier, cost and
+            delivery-day breakdown.
+          </p>
+        </div>
+        """, unsafe_allow_html=True)
+        st.button("Launch Smart Fulfillment Agent",
+                  use_container_width=True, key="btn_launch_smart")
+
+
 # ================= ORDER LIFE CYCLE PAGE =================
 elif st.session_state.current_page == "Order Life Cycle":
     st.title("Order Details Lookup")
@@ -5449,57 +5586,67 @@ elif st.session_state.current_page == "Order Life Cycle":
                             EFFECTIVE_DATE
                     """)
 
-                    # Order Summary: Display as rectangular tiles (one per order) styled like KPIs
+                    # Order Summary: Display as dedicated cards
                     if not order_summary.empty:
                         st.markdown(
                             '<h2 style="font-size: 24px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Order Summary</h2>', unsafe_allow_html=True)
 
-                        # Display multiple tiles if multiple orders selected
-                        num_orders = len(order_summary)
-                        cols_per_row = 3
-                        num_rows = (num_orders + cols_per_row -
-                                    1) // cols_per_row
+                        summary_cols = st.columns(3)
+                        for idx, (_, summary_row) in enumerate(order_summary.iterrows()):
+                            order_date_str = summary_row['ORDER_DATE'].strftime(
+                                '%Y-%m-%d') if pd.notna(summary_row['ORDER_DATE']) else 'N/A'
+                            total_amount = f"${float(summary_row['TOTAL_AMOUNT']):,.2f}" if pd.notna(
+                                summary_row['TOTAL_AMOUNT']) else "$0.00"
+                            total_quantity = int(summary_row['TOTAL_QUANTITY']) if pd.notna(
+                                summary_row['TOTAL_QUANTITY']) else 0
+                            expected_delivery_date = summary_row['EXPECTED_DELIVERY_DATE'].strftime(
+                                '%Y-%m-%d') if pd.notna(summary_row['EXPECTED_DELIVERY_DATE']) else 'N/A'
 
-                        for row_idx in range(num_rows):
-                            cols = st.columns(cols_per_row)
-                            for col_idx in range(cols_per_row):
-                                order_idx = row_idx * cols_per_row + col_idx
-                                if order_idx < num_orders:
-                                    summary_row = order_summary.iloc[order_idx]
-                                    order_date_str = summary_row['ORDER_DATE'].strftime(
-                                        '%Y-%m-%d') if pd.notna(summary_row['ORDER_DATE']) else 'N/A'
-                                    total_amount = f"${float(summary_row['TOTAL_AMOUNT']):,.2f}" if pd.notna(
-                                        summary_row['TOTAL_AMOUNT']) else "$0.00"
-                                    total_quantity = int(summary_row['TOTAL_QUANTITY']) if pd.notna(
-                                        summary_row['TOTAL_QUANTITY']) else 0
-                                    expected_delivery_date = summary_row['EXPECTED_DELIVERY_DATE'].strftime(
-                                        '%Y-%m-%d') if pd.notna(summary_row['EXPECTED_DELIVERY_DATE']) else 'N/A'
-
-                                    with cols[col_idx]:
-                                        # Rectangular tile with single color like KPIs
-                                        st.markdown(f"""
-                                            <div class="kpi-card kpi-card-blue" style="margin-bottom: 16px;">
-                                                <div class="kpi-label">ORDER ID: {summary_row['ORDER_ID']}</div>
-                                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; text-align: left;">
-                                                    <div>
-                                                        <div style="font-size: 11px; opacity: 0.8; margin-bottom: 4px;">Order Date</div>
-                                                        <div style="font-size: 14px; font-weight: 600;">{order_date_str}</div>
-                                                    </div>
-                                                    <div>
-                                                        <div style="font-size: 11px; opacity: 0.8; margin-bottom: 4px;">Quantity</div>
-                                                        <div style="font-size: 14px; font-weight: 600;">{total_quantity}</div>
-                                                    </div>
-                                                    <div>
-                                                        <div style="font-size: 11px; opacity: 0.8; margin-bottom: 4px;">Total Amount</div>
-                                                        <div style="font-size: 16px; font-weight: 700;">{total_amount}</div>
-                                                    </div>
-                                                    <div>
-                                                        <div style="font-size: 11px; opacity: 0.8; margin-bottom: 4px;">Expected Delivery Date</div>
-                                                        <div style="font-size: 14px; font-weight: 600;">{expected_delivery_date}</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        """, unsafe_allow_html=True)
+                            with summary_cols[idx % 3]:
+                                st.markdown(f"""
+                                <div style="
+                                    width: 100%;
+                                    background: #dbeafe;
+                                    border: 1px solid #bfdbfe;
+                                    border-radius: 16px;
+                                    padding: 18px 20px;
+                                    margin: 0 0 16px 0;
+                                    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+                                ">
+                                    <div style="
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        color: #334155;
+                                        text-transform: uppercase;
+                                        letter-spacing: 0.4px;
+                                        margin-bottom: 12px;
+                                    ">
+                                        ORDER ID: {summary_row['ORDER_ID']}
+                                    </div>
+                                    <div style="
+                                        display: grid;
+                                        grid-template-columns: 1fr 1fr;
+                                        gap: 14px 28px;
+                                    ">
+                                        <div>
+                                            <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Order Date</div>
+                                            <div style="font-size: 15px; font-weight: 700; color: #0f172a; line-height: 1.2;">{order_date_str}</div>
+                                        </div>
+                                        <div>
+                                            <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Quantity</div>
+                                            <div style="font-size: 15px; font-weight: 700; color: #0f172a; line-height: 1.2;">{total_quantity}</div>
+                                        </div>
+                                        <div>
+                                            <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Total Amount</div>
+                                            <div style="font-size: 17px; font-weight: 800; color: #0f172a; line-height: 1.2;">{total_amount}</div>
+                                        </div>
+                                        <div>
+                                            <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Expected Delivery Date</div>
+                                            <div style="font-size: 15px; font-weight: 700; color: #0f172a; line-height: 1.2;">{expected_delivery_date}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            """, unsafe_allow_html=True)
 
                         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -5549,199 +5696,238 @@ elif st.session_state.current_page == "Order Life Cycle":
                     </style>
                     """, unsafe_allow_html=True)
 
-                    tab1, tab2, tab3 = st.tabs(
-                        ["Product Info", "Dealer Info", "Bill Of Materials"])
+                    # Render Order Details inside a card-style container
+                    details_card = st.container(
+                        border=True, key="order_details_card")
+                    with details_card:
+                        st.markdown("""
+                        <style>
+                        .st-key-order_details_card div[data-testid="stVerticalBlockBorderWrapper"] {
+                            background: #dbeafe !important;
+                            border: 1px solid #bfdbfe !important;
+                            border-radius: 14px !important;
+                            box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08) !important;
+                            padding: 14px 16px 18px 16px !important;
+                        }
+                        .st-key-order_details_card [data-testid="stTabs"] > div > div {
+                            background: rgba(191, 219, 254, 0.55) !important;
+                            border-radius: 10px !important;
+                            box-shadow: none !important;
+                        }
+                        .st-key-order_details_card .stTabs [data-baseweb="tab"] {
+                            color: #334155 !important;
+                            font-weight: 600 !important;
+                            border-radius: 8px 8px 0 0 !important;
+                        }
+                        .st-key-order_details_card .stTabs [aria-selected="true"] {
+                            background: #1e40af !important;
+                            color: #ffffff !important;
+                            border-bottom: 2px solid #1e40af !important;
+                        }
+                        .st-key-order_details_card .stTabs [aria-selected="true"] * {
+                            color: #ffffff !important;
+                        }
+                        .st-key-order_details_card .stTabs [aria-selected="false"] {
+                            background: transparent !important;
+                            color: #334155 !important;
+                            border-bottom: 2px solid transparent !important;
+                        }
+                        </style>
+                        """, unsafe_allow_html=True)
 
-                    with tab1:
-                        st.markdown(
-                            '<h2 style="font-size: 28px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Product Information</h2>', unsafe_allow_html=True)
+                        tab1, tab2, tab3 = st.tabs(
+                            ["Product Info", "Dealer Info", "Bill Of Materials"])
 
-                        product_ids = (
-                            product_rows["PRODUCT_ID"]
-                            .dropna()
-                            .astype(str)
-                            .unique()
-                            .tolist()
-                        )
+                        with tab1:
+                            st.markdown(
+                                '<h2 style="font-size: 28px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Product Information</h2>', unsafe_allow_html=True)
 
-                        if product_ids:
-                            product_ids_safe = ",".join(
-                                "'" + pid.replace("'", "''") + "'"
-                                for pid in product_ids
+                            product_ids = (
+                                product_rows["PRODUCT_ID"]
+                                .dropna()
+                                .astype(str)
+                                .unique()
+                                .tolist()
                             )
 
-                            product_info = run_query(f"""
-                                WITH ordered AS (
-                                        SELECT
-                                        c.PRODUCT_ID,
-                                        c.PRODUCT_NAME,
-                                        c.MATERIAL_TYPE,
-                                        c.MATERIAL_GROUP,
-                                        c.PRODUCT_HIERARCHY,
-                                        c.UNIT_OF_MEASURE,
-                                        c.PRODUCT_TYPE,
-                                        c.PRODUCT_CATEGORY,
-                                        c.PRODUCT_FAMILY,
-                                        c.PRODUCT_GROUP,
-                                        c.CONFIG_ID,
-                                        c.CONFIG_NAME,
-                                        c.CONFIG_TYPE,
-                                        c.CONFIG_STATUS,
-                                        c.IS_DEFAULT_CONFIG,
-                                        c.UNIT_PRICE,
-                                        o.TOTAL_QUANTITY_ORDERED,
-                                        ROW_NUMBER() OVER (
-                                                PARTITION BY c.PRODUCT_ID
-                                                ORDER BY c.IS_DEFAULT_CONFIG DESC
-                                        ) AS rn
-                                        FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.PRODUCT_CATALOG_VW c
-                                        JOIN (
-                                            SELECT
-                                            PRODUCT_ID,
-                                            CONFIG_ID,
-                                            QUANTITY AS TOTAL_QUANTITY_ORDERED
-                                            FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.FACT_ORDER_HISTORY_VW
-                                            WHERE {order_filter}
-                                            ) o ON c.PRODUCT_ID = o.PRODUCT_ID AND c.CONFIG_ID = o.CONFIG_ID
-                                        )
-                                        SELECT * FROM ordered WHERE rn = 1 ORDER BY PRODUCT_NAME;
-                            """)
-
-                            if not product_info.empty:
-                                for col in ["UNIT_PRICE"]:
-                                    product_info[col] = product_info[col].apply(
-                                        lambda x: f"${float(x):,.2f}" if x else "$0.00"
-                                    )
-
-                                product_info["TOTAL_QUANTITY_ORDERED"] = (
-                                    product_info["TOTAL_QUANTITY_ORDERED"].fillna(
-                                        0).astype(int)
+                            if product_ids:
+                                product_ids_safe = ",".join(
+                                    "'" + pid.replace("'", "''") + "'"
+                                    for pid in product_ids
                                 )
 
-                                product_info["IS_DEFAULT_CONFIG"] = product_info[
-                                    "IS_DEFAULT_CONFIG"
-                                ].apply(lambda x: "Yes" if x else "No")
+                                product_info = run_query(f"""
+                                    WITH ordered AS (
+                                            SELECT
+                                            c.PRODUCT_ID,
+                                            c.PRODUCT_NAME,
+                                            c.MATERIAL_TYPE,
+                                            c.MATERIAL_GROUP,
+                                            c.PRODUCT_HIERARCHY,
+                                            c.UNIT_OF_MEASURE,
+                                            c.PRODUCT_TYPE,
+                                            c.PRODUCT_CATEGORY,
+                                            c.PRODUCT_FAMILY,
+                                            c.PRODUCT_GROUP,
+                                            c.CONFIG_ID,
+                                            c.CONFIG_NAME,
+                                            c.CONFIG_TYPE,
+                                            c.CONFIG_STATUS,
+                                            c.IS_DEFAULT_CONFIG,
+                                            c.UNIT_PRICE,
+                                            o.TOTAL_QUANTITY_ORDERED,
+                                            ROW_NUMBER() OVER (
+                                                    PARTITION BY c.PRODUCT_ID
+                                                    ORDER BY c.IS_DEFAULT_CONFIG DESC
+                                            ) AS rn
+                                            FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.PRODUCT_CATALOG_VW c
+                                            JOIN (
+                                                SELECT
+                                                PRODUCT_ID,
+                                                CONFIG_ID,
+                                                QUANTITY AS TOTAL_QUANTITY_ORDERED
+                                                FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.FACT_ORDER_HISTORY_VW
+                                                WHERE {order_filter}
+                                                ) o ON c.PRODUCT_ID = o.PRODUCT_ID AND c.CONFIG_ID = o.CONFIG_ID
+                                            )
+                                            SELECT * FROM ordered WHERE rn = 1 ORDER BY PRODUCT_NAME;
+                                """)
 
-                                st.dataframe(
-                                    product_info, use_container_width=True, hide_index=True)
-                            else:
-                                st.warning(
-                                    "No product configurations matched the order unit price")
-                        else:
-                            st.info(
-                                "No products associated with selected orders")
+                                if not product_info.empty:
+                                    for col in ["UNIT_PRICE"]:
+                                        product_info[col] = product_info[col].apply(
+                                            lambda x: f"${float(x):,.2f}" if x else "$0.00"
+                                        )
 
-                    with tab2:
-                        st.markdown(
-                            '<h2 style="font-size: 28px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Dealer Information</h2>', unsafe_allow_html=True)
-
-                        dealer_ids = (
-                            order_details['DEALER_ID']
-                            .dropna()
-                            .astype(str)
-                            .unique()
-                            .tolist()
-                        )
-
-                        if dealer_ids:
-                            dealer_ids_safe = ",".join(
-                                "'" + did.replace("'", "''") + "'"
-                                for did in dealer_ids
-                            )
-
-                            dealer_info = run_query(f"""
-                                SELECT
-                                    f.DEALER_ID,
-                                    f.DEALER_NAME,
-                                    d.DEALER_TYPE,
-                                    d.COUNTRY,
-                                    d.REGION,
-                                    d.CITY,
-                                    SUM(k.ORDER_COUNT) AS TOTAL_ORDERS,
-                                    SUM(k.REVENUE) AS TOTAL_REVENUE,
-                                    CASE
-                                        WHEN SUM(k.ORDER_COUNT) > 0
-                                        THEN SUM(k.REVENUE) / SUM(k.ORDER_COUNT)
-                                        ELSE 0
-                                    END AS AVG_ORDER_VALUE
-                                FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.FACT_ORDER_HISTORY_VW f
-                                LEFT JOIN {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.DEALER_ORDER_KPI_VW k
-                                    ON f.DEALER_ID = k.DEALER_ID
-                                LEFT JOIN (SELECT * FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.DIM_DEALER_VW WHERE CURRENT_FLAG = 'Y') d
-                                    ON f.DEALER_ID = d.DEALER_ID
-                                WHERE f.DEALER_ID IN ({dealer_ids_safe})
-                                GROUP BY
-                                    f.DEALER_ID,
-                                    f.DEALER_NAME,
-                                    d.DEALER_TYPE,
-                                    d.COUNTRY,
-                                    d.REGION,
-                                    d.CITY
-                                ORDER BY f.DEALER_NAME
-                            """)
-
-                            dealer_info["TOTAL_REVENUE"] = dealer_info["TOTAL_REVENUE"].apply(
-                                lambda x: f"${float(x):,.0f}" if x else "$0"
-                            )
-                            dealer_info["AVG_ORDER_VALUE"] = dealer_info["AVG_ORDER_VALUE"].apply(
-                                lambda x: f"${float(x):,.0f}" if x else "$0"
-                            )
-                            dealer_info["TOTAL_ORDERS"] = dealer_info["TOTAL_ORDERS"].fillna(
-                                0).astype(int)
-
-                            st.dataframe(
-                                dealer_info, use_container_width=True, hide_index=True)
-                        else:
-                            st.info("No dealer information found")
-
-                    with tab3:
-                        st.markdown(
-                            '<h2 style="font-size: 28px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Bill Of Materials</h2>', unsafe_allow_html=True)
-
-                        parent_product_ids = (
-                            product_rows['PRODUCT_ID']
-                            .dropna()
-                            .astype(str)
-                            .unique()
-                            .tolist()
-                        )
-
-                        if parent_product_ids:
-                            parent_product_ids_safe = ",".join(
-                                "'" + pid.replace("'", "''") + "'"
-                                for pid in parent_product_ids
-                            )
-
-                            bom_df = run_query(f"""
-                                SELECT
-                                    PARENT_PRODUCT,
-                                    PARENT_PRODUCT_NAME,
-                                    CHILD_PRODUCT,
-                                    CHILD_PRODUCT_NAME,
-                                    QUANTITY_PER_ASSEMBLY,
-                                    UNIT_OF_MEASURE,
-                                    SCRAP_FACTOR
-                                FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.PRODUCT_BOM_VW
-                                WHERE PARENT_PRODUCT IN ({parent_product_ids_safe})
-                                ORDER BY
-                                    PARENT_PRODUCT
-                            """)
-
-                            if not bom_df.empty:
-
-                                if "SCRAP_FACTOR" in bom_df.columns:
-                                    bom_df["SCRAP_FACTOR"] = bom_df["SCRAP_FACTOR"].apply(
-                                        lambda x: f"{float(x) * 100:.1f}%" if x is not None else "0.0%"
+                                    product_info["TOTAL_QUANTITY_ORDERED"] = (
+                                        product_info["TOTAL_QUANTITY_ORDERED"].fillna(
+                                            0).astype(int)
                                     )
 
-                                st.dataframe(
-                                    bom_df, use_container_width=True, hide_index=True)
+                                    product_info["IS_DEFAULT_CONFIG"] = product_info[
+                                        "IS_DEFAULT_CONFIG"
+                                    ].apply(lambda x: "Yes" if x else "No")
+
+                                    st.dataframe(
+                                        product_info, use_container_width=True, hide_index=True)
+                                else:
+                                    st.warning(
+                                        "No product configurations matched the order unit price")
                             else:
                                 st.info(
-                                    "No BOM data found for selected products")
-                        else:
-                            st.info(
-                                "No parent products available for BOM lookup")
+                                    "No products associated with selected orders")
+
+                        with tab2:
+                            st.markdown(
+                                '<h2 style="font-size: 28px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Dealer Information</h2>', unsafe_allow_html=True)
+
+                            dealer_ids = (
+                                order_details['DEALER_ID']
+                                .dropna()
+                                .astype(str)
+                                .unique()
+                                .tolist()
+                            )
+
+                            if dealer_ids:
+                                dealer_ids_safe = ",".join(
+                                    "'" + did.replace("'", "''") + "'"
+                                    for did in dealer_ids
+                                )
+
+                                dealer_info = run_query(f"""
+                                    SELECT
+                                        f.DEALER_ID,
+                                        f.DEALER_NAME,
+                                        d.DEALER_TYPE,
+                                        d.COUNTRY,
+                                        d.REGION,
+                                        d.CITY,
+                                        SUM(k.ORDER_COUNT) AS TOTAL_ORDERS,
+                                        SUM(k.REVENUE) AS TOTAL_REVENUE,
+                                        CASE
+                                            WHEN SUM(k.ORDER_COUNT) > 0
+                                            THEN SUM(k.REVENUE) / SUM(k.ORDER_COUNT)
+                                            ELSE 0
+                                        END AS AVG_ORDER_VALUE
+                                    FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.FACT_ORDER_HISTORY_VW f
+                                    LEFT JOIN {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.DEALER_ORDER_KPI_VW k
+                                        ON f.DEALER_ID = k.DEALER_ID
+                                    LEFT JOIN (SELECT * FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.DIM_DEALER_VW WHERE CURRENT_FLAG = 'Y') d
+                                        ON f.DEALER_ID = d.DEALER_ID
+                                    WHERE f.DEALER_ID IN ({dealer_ids_safe})
+                                    GROUP BY
+                                        f.DEALER_ID,
+                                        f.DEALER_NAME,
+                                        d.DEALER_TYPE,
+                                        d.COUNTRY,
+                                        d.REGION,
+                                        d.CITY
+                                    ORDER BY f.DEALER_NAME
+                                """)
+
+                                dealer_info["TOTAL_REVENUE"] = dealer_info["TOTAL_REVENUE"].apply(
+                                    lambda x: f"${float(x):,.0f}" if x else "$0"
+                                )
+                                dealer_info["AVG_ORDER_VALUE"] = dealer_info["AVG_ORDER_VALUE"].apply(
+                                    lambda x: f"${float(x):,.0f}" if x else "$0"
+                                )
+                                dealer_info["TOTAL_ORDERS"] = dealer_info["TOTAL_ORDERS"].fillna(
+                                    0).astype(int)
+
+                                st.dataframe(
+                                    dealer_info, use_container_width=True, hide_index=True)
+                            else:
+                                st.info("No dealer information found")
+
+                        with tab3:
+                            st.markdown(
+                                '<h2 style="font-size: 28px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Bill Of Materials</h2>', unsafe_allow_html=True)
+
+                            parent_product_ids = (
+                                product_rows['PRODUCT_ID']
+                                .dropna()
+                                .astype(str)
+                                .unique()
+                                .tolist()
+                            )
+
+                            if parent_product_ids:
+                                parent_product_ids_safe = ",".join(
+                                    "'" + pid.replace("'", "''") + "'"
+                                    for pid in parent_product_ids
+                                )
+
+                                bom_df = run_query(f"""
+                                    SELECT
+                                        PARENT_PRODUCT,
+                                        PARENT_PRODUCT_NAME,
+                                        CHILD_PRODUCT,
+                                        CHILD_PRODUCT_NAME,
+                                        QUANTITY_PER_ASSEMBLY,
+                                        UNIT_OF_MEASURE,
+                                        SCRAP_FACTOR
+                                    FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.PRODUCT_BOM_VW
+                                    WHERE PARENT_PRODUCT IN ({parent_product_ids_safe})
+                                    ORDER BY
+                                        PARENT_PRODUCT
+                                """)
+
+                                if not bom_df.empty:
+
+                                    if "SCRAP_FACTOR" in bom_df.columns:
+                                        bom_df["SCRAP_FACTOR"] = bom_df["SCRAP_FACTOR"].apply(
+                                            lambda x: f"{float(x) * 100:.1f}%" if x is not None else "0.0%"
+                                        )
+
+                                    st.dataframe(
+                                        bom_df, use_container_width=True, hide_index=True)
+                                else:
+                                    st.info(
+                                        "No BOM data found for selected products")
+                            else:
+                                st.info(
+                                    "No parent products available for BOM lookup")
 
             except Exception as e:
                 st.error(f"Error loading orders: {str(e)}")
