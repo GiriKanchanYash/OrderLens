@@ -1,0 +1,12 @@
+streamlit
+pandas
+pyodbc
+pymssql
+python-dotenv
+openai
+altair
+PyYAML
+azure-identity
+azure-keyvault-secrets
+azure-keyvault-keys
+azure-core

@@ -1,0 +1,847 @@
+name: orderlens_semantic_model
+description: Enterprise semantic model for Sales & Operations Planning, derived from Information Mart dimensional views.
+
+
+tables:
+  # -------------------------
+  # DIMENSION: DIM_CUSTOMER
+  # -------------------------
+  - name: customers
+    description: Customer dimension with SCD Type 2 history tracking
+    base_table:
+      database: OrderLens
+      schema: INFORMATION_MART
+      table: DIM_CUSTOMER_VW
+    primary_key:
+      columns:
+        - CUSTOMER_ID
+    dimensions:
+      - name: customer_id
+        synonyms: ["customer code", "customer number", "kunnr"]
+        description: Customer ID (KUNNR)
+        expr: CUSTOMER_ID
+        data_type: varchar
+        unique: true
+      - name: customer_name
+        synonyms: ["customer", "account name"]
+        description: Customer name
+        expr: CUSTOMER_NAME
+        data_type: varchar
+      - name: country
+        synonyms: ["country code"]
+        description: Country code
+        expr: COUNTRY
+        data_type: varchar
+      - name: region
+        synonyms: ["state", "region code"]
+        description: Region/State code
+        expr: REGION
+        data_type: varchar
+      - name: city
+        description: City name
+        expr: CITY
+        data_type: varchar
+      - name: postal_code
+        synonyms: ["zip code", "zip"]
+        description: Postal code
+        expr: POSTAL_CODE
+        data_type: varchar
+      - name: customer_class
+        synonyms: ["kukla", "classification"]
+        description: Customer classification (KUKLA)
+        expr: CUSTOMER_CLASS
+        data_type: varchar
+      - name: account_group
+        synonyms: ["ktokd"]
+        description: Account group (KTOKD)
+        expr: ACCOUNT_GROUP
+        data_type: varchar
+      - name: customer_group
+        synonyms: ["kdgrp"]
+        description: Customer group (KDGRP)
+        expr: CUSTOMER_GROUP
+        data_type: varchar
+      - name: sales_district
+        synonyms: ["bzirk", "territory"]
+        description: Sales district (BZIRK)
+        expr: SALES_DISTRICT
+        data_type: varchar
+      - name: abc_class
+        synonyms: ["abc classification", "klabc"]
+        description: ABC classification (KLABC)
+        expr: ABC_CLASS
+        data_type: varchar
+      - name: incoterm
+        synonyms: ["incoterms", "shipping terms"]
+        description: Incoterms
+        expr: INCOTERM
+        data_type: varchar
+      - name: effective_date
+        description: Record effective date
+        expr: EFFECTIVE_DATE
+        data_type: datetime2
+      - name: expiry_date
+        description: Record expiry date (9999-12-31 for current)
+        expr: EXPIRY_DATE
+        data_type: datetime2
+      - name: current_flag
+        description: Y = current record, N = historical
+        expr: CURRENT_FLAG
+        data_type: varchar
+
+  # -------------------------
+  # DIMENSION: DIM_PRODUCT
+  # -------------------------
+  - name: products
+    description: Product dimension with SCD Type 2 history tracking
+    base_table:
+      database: OrderLens
+      schema: INFORMATION_MART
+      table: DIM_PRODUCT_VW
+    primary_key:
+      columns:
+        - PRODUCT_ID
+    dimensions:
+      - name: product_id
+        synonyms: ["product code", "material id", "matnr"]
+        description: Product ID (MATNR)
+        expr: PRODUCT_ID
+        data_type: varchar
+        unique: true
+      - name: product_name
+        synonyms: ["product", "material description", "item name"]
+        description: Product/material description
+        expr: PRODUCT_NAME
+        data_type: varchar
+      - name: material_type
+        synonyms: ["mtart", "mat type"]
+        description: Material type (MTART)
+        expr: MATERIAL_TYPE
+        data_type: varchar
+      - name: material_group
+        synonyms: ["matkl", "mat group"]
+        description: Material group (MATKL)
+        expr: MATERIAL_GROUP
+        data_type: varchar
+      - name: product_hierarchy
+        synonyms: ["prdha", "hierarchy"]
+        description: Product hierarchy (PRDHA)
+        expr: PRODUCT_HIERARCHY
+        data_type: varchar
+      - name: external_group
+        synonyms: ["extwg", "external material group"]
+        description: External material group (EXTWG)
+        expr: EXTERNAL_GROUP
+        data_type: varchar
+      - name: unit_of_measure
+        synonyms: ["uom", "base unit"]
+        description: Base unit of measure
+        expr: UNIT_OF_MEASURE
+        data_type: varchar
+      - name: product_type
+        synonyms: ["type", "category"]
+        description: Product type classification
+        expr: PRODUCT_TYPE
+        data_type: varchar
+      - name: product_category
+        synonyms: ["category"]
+        description: Product category
+        expr: PRODUCT_CATEGORY
+        data_type: varchar
+      - name: product_family
+        synonyms: ["family", "product line"]
+        description: Product family
+        expr: PRODUCT_FAMILY
+        data_type: varchar
+      - name: product_group
+        synonyms: ["group"]
+        description: Product group
+        expr: PRODUCT_GROUP
+        data_type: varchar
+      - name: effective_date
+        description: Record effective date
+        expr: EFFECTIVE_DATE
+        data_type: datetime2
+      - name: expiry_date
+        description: Record expiry date (9999-12-31 for current)
+        expr: EXPIRY_DATE
+        data_type: datetime2
+      - name: current_flag
+        description: Y = current record, N = historical
+        expr: CURRENT_FLAG
+        data_type: varchar
+
+  # -------------------------
+  # DIMENSION: DIM_DEALER
+  # -------------------------
+  - name: dealers
+    description: Dealer dimension - subset of customers classified as dealers based on ABC classification
+    base_table:
+      database: OrderLens
+      schema: INFORMATION_MART
+      table: DIM_DEALER_VW
+    primary_key:
+      columns:
+        - DEALER_ID
+    dimensions:
+      - name: dealer_id
+        synonyms: ["dealer code", "dealer number"]
+        description: Dealer ID (same as customer ID)
+        expr: DEALER_ID
+        data_type: varchar
+        unique: true
+      - name: dealer_name
+        synonyms: ["dealer", "partner name"]
+        description: Dealer name
+        expr: DEALER_NAME
+        data_type: varchar
+      - name: dealer_type
+        synonyms: ["dealer category", "dealer class"]
+        description: Dealer type based on ABC classification (Premium/Standard/Associate)
+        expr: DEALER_TYPE
+        data_type: varchar
+      - name: country
+        synonyms: ["country code"]
+        description: Country code
+        expr: COUNTRY
+        data_type: varchar
+      - name: region
+        synonyms: ["state", "region code"]
+        description: Region/State code
+        expr: REGION
+        data_type: varchar
+      - name: city
+        description: City name
+        expr: CITY
+        data_type: varchar
+      - name: sales_district
+        synonyms: ["territory", "district"]
+        description: Sales territory/district
+        expr: SALES_DISTRICT
+        data_type: varchar
+      - name: customer_group
+        synonyms: ["group"]
+        description: Customer group
+        expr: CUSTOMER_GROUP
+        data_type: varchar
+      - name: incoterm
+        synonyms: ["incoterms", "shipping terms"]
+        description: Incoterms
+        expr: INCOTERM
+        data_type: varchar
+      - name: effective_date
+        description: Record effective date
+        expr: EFFECTIVE_DATE
+        data_type: datetime2
+      - name: expiry_date
+        description: Record expiry date (9999-12-31 for current)
+        expr: EXPIRY_DATE
+        data_type: datetime2
+      - name: current_flag
+        description: Y = current record, N = historical
+        expr: CURRENT_FLAG
+        data_type: varchar
+
+  # -------------------------
+  # FACT: FACT_ORDER_HISTORY
+  # -------------------------
+  - name: order_history
+    description: Order history fact table tracking full order status progression (PLACED -> CONFIRMED -> SHIPPED -> DELIVERED) with configuration details
+    base_table:
+      database: OrderLens
+      schema: INFORMATION_MART
+      table: FACT_ORDER_HISTORY_VW
+    primary_key:
+      columns:
+        - ORDER_ID
+        - ORDER_ITEM_ID
+        - ORDER_STATUS
+    dimensions:
+      - name: order_id
+        synonyms: ["order number", "sales order", "so id", "vbeln"]
+        description: Sales order number (VBELN)
+        expr: ORDER_ID
+        data_type: varchar
+      - name: order_item_id
+        synonyms: ["line item", "posnr", "item number"]
+        description: Sales order item number (POSNR)
+        expr: ORDER_ITEM_ID
+        data_type: varchar
+      - name: customer_id
+        description: Customer ID
+        expr: CUSTOMER_ID
+        data_type: varchar
+      - name: customer_name
+        synonyms: ["customer"]
+        description: Customer name
+        expr: CUSTOMER_NAME
+        data_type: varchar
+      - name: product_id
+        description: Product ID
+        expr: PRODUCT_ID
+        data_type: varchar
+      - name: product_name
+        synonyms: ["product"]
+        description: Product name
+        expr: PRODUCT_NAME
+        data_type: varchar
+      - name: config_id
+        synonyms: ["configuration id"]
+        description: Configuration ID ordered
+        expr: CONFIG_ID
+        data_type: varchar
+      - name: config_name
+        synonyms: ["configuration", "config"]
+        description: Configuration name (Base/Standard/Premium)
+        expr: CONFIG_NAME
+        data_type: varchar
+      - name: config_type
+        synonyms: ["configuration type"]
+        description: Configuration type (STANDARD/CUSTOM)
+        expr: CONFIG_TYPE
+        data_type: varchar
+      - name: dealer_id
+        description: Dealer ID
+        expr: DEALER_ID
+        data_type: varchar
+      - name: dealer_name
+        synonyms: ["dealer"]
+        description: Dealer name
+        expr: DEALER_NAME
+        data_type: varchar
+      - name: order_status
+        synonyms: ["status", "delivery status"]
+        description: Order status (PLACED, CONFIRMED, SHIPPED, DELIVERED)
+        expr: ORDER_STATUS
+        data_type: varchar
+      - name: expected_delivery_date
+        synonyms: ["promised date", "expected date"]
+        description: Expected/promised delivery date
+        expr: EXPECTED_DELIVERY_DATE
+        data_type: date
+      - name: delivery_date
+        synonyms: ["actual delivery", "delivered date"]
+        description: Actual delivery date (NULL if not yet delivered)
+        expr: DELIVERY_DATE
+        data_type: date
+      - name: effective_date
+        synonyms: ["status date", "order date"]
+        description: Date this status became effective
+        expr: EFFECTIVE_DATE
+        data_type: date
+      - name: effective_month
+        synonyms: ["month", "order month"]
+        description: Month of effective date for trending
+        expr: "DATEADD(month, DATEDIFF(month, 0, EFFECTIVE_DATE), 0)"
+        data_type: datetime2
+      - name: effective_quarter
+        synonyms: ["quarter"]
+        description: Quarter of effective date
+        expr: "DATEPART(QUARTER, EFFECTIVE_DATE)"
+        data_type: NUMBER
+      - name: effective_year
+        synonyms: ["year"]
+        description: Year of effective date
+        expr: "DATEPART(YEAR, EFFECTIVE_DATE)"
+        data_type: NUMBER
+      - name: current_flag
+        description: Y = current status, N = historical status
+        expr: CURRENT_FLAG
+        data_type: varchar
+      - name: is_current
+        description: True if this is the current record
+        expr: "CURRENT_FLAG = 'Y'"
+        data_type: BOOLEAN
+    measures:
+      - name: unit_price
+        synonyms: ["price"]
+        description: Unit price from configuration
+        expr: UNIT_PRICE
+        data_type: decimal
+        default_aggregation: avg
+      - name: quantity
+        synonyms: ["qty", "units", "quantity ordered"]
+        description: Ordered quantity
+        expr: QUANTITY
+        data_type: decimal
+        default_aggregation: sum
+      - name: total_amount
+        synonyms: ["revenue", "sales", "order amount", "line total"]
+        description: Total amount (price * quantity)
+        expr: TOTAL_AMOUNT
+        data_type: decimal
+        default_aggregation: sum
+      - name: order_count
+        synonyms: ["number of orders", "total orders"]
+        description: Count of distinct orders
+        expr: ORDER_ID
+        data_type: varchar
+        default_aggregation: count_distinct
+      - name: order_age_days
+        synonyms: ["age", "days old"]
+        description: Number of days since order was placed
+        expr: "DATEDIFF(day, EFFECTIVE_DATE, GETDATE())"
+        data_type: NUMBER
+        default_aggregation: avg
+      - name: delivery_days
+        synonyms: ["delivery time", "time to deliver", "days to deliver"]
+        description: Number of days taken to deliver an order
+        expr: |
+          CASE
+            WHEN ORDER_STATUS = 'DELIVERED' AND DELIVERY_DATE IS NOT NULL
+            THEN DATEDIFF(day, EFFECTIVE_DATE, DELIVERY_DATE)
+            ELSE NULL
+          END
+        data_type: NUMBER
+        default_aggregation: avg
+
+  # -------------------------
+  # VIEW: VW_DEALER_ORDER_KPI
+  # -------------------------
+  - name: dealer_order_kpi
+    description: Dealer/product/config KPI rollup for dashboards - aggregated by day
+    base_table:
+      database: OrderLens
+      schema: INFORMATION_MART
+      table: DEALER_ORDER_KPI_VW
+    primary_key:
+      columns:
+        - ORDER_DATE
+        - DEALER_ID
+        - PRODUCT_ID
+        - CONFIG_ID
+    dimensions:
+      - name: order_date
+        synonyms: ["date"]
+        description: Order date
+        expr: ORDER_DATE
+        data_type: datetime2
+      - name: order_month
+        synonyms: ["month"]
+        description: Order month for trending
+        expr: "DATEADD(month, DATEDIFF(month, 0, ORDER_DATE), 0)"
+        data_type: datetime2
+      - name: dealer_id
+        description: Dealer identifier
+        expr: DEALER_ID
+        data_type: varchar
+      - name: dealer_name
+        synonyms: ["dealer", "customer"]
+        description: Dealer name
+        expr: DEALER_NAME
+        data_type: varchar
+      - name: product_id
+        description: Product identifier
+        expr: PRODUCT_ID
+        data_type: varchar
+      - name: product_name
+        synonyms: ["product"]
+        description: Product name
+        expr: PRODUCT_NAME
+        data_type: varchar
+      - name: config_id
+        synonyms: ["configuration id"]
+        description: Configuration identifier
+        expr: CONFIG_ID
+        data_type: varchar
+      - name: config_name
+        synonyms: ["configuration", "config"]
+        description: Configuration name
+        expr: CONFIG_NAME
+        data_type: varchar
+      - name: config_type
+        synonyms: ["configuration type"]
+        description: Configuration type (STANDARD/CUSTOM)
+        expr: CONFIG_TYPE
+        data_type: varchar
+    measures:
+      - name: order_count
+        synonyms: ["number of orders", "total orders"]
+        description: Distinct order count
+        expr: ORDER_COUNT
+        data_type: decimal
+        default_aggregation: sum
+      - name: quantity_ordered
+        synonyms: ["quantity", "units"]
+        description: Total quantity ordered
+        expr: QUANTITY_ORDERED
+        data_type: decimal
+        default_aggregation: sum
+      - name: revenue
+        synonyms: ["sales", "total sales"]
+        description: Total revenue
+        expr: REVENUE
+        data_type: decimal
+        default_aggregation: sum
+
+  # -------------------------
+  # VIEW: PRODUCT_CATALOG_VW
+  # -------------------------
+  - name: product_catalog
+    description: Product catalog with configuration details. Each product has Base/Standard/Premium configs with different prices.
+    base_table:
+      database: OrderLens
+      schema: INFORMATION_MART
+      table: PRODUCT_CATALOG_VW
+    primary_key:
+      columns:
+        - PRODUCT_ID
+        - CONFIG_ID
+    dimensions:
+      - name: product_id
+        synonyms: ["product code", "material id"]
+        description: Product identifier
+        expr: PRODUCT_ID
+        data_type: varchar
+      - name: product_name
+        synonyms: ["product", "item name"]
+        description: Product name
+        expr: PRODUCT_NAME
+        data_type: varchar
+      - name: material_type
+        synonyms: ["type"]
+        description: Material type
+        expr: MATERIAL_TYPE
+        data_type: varchar
+      - name: material_group
+        synonyms: ["group"]
+        description: Material group
+        expr: MATERIAL_GROUP
+        data_type: varchar
+      - name: product_hierarchy
+        synonyms: ["hierarchy"]
+        description: Product hierarchy
+        expr: PRODUCT_HIERARCHY
+        data_type: varchar
+      - name: unit_of_measure
+        synonyms: ["uom"]
+        description: Unit of measure
+        expr: UNIT_OF_MEASURE
+        data_type: varchar
+      - name: product_type
+        description: Product type
+        expr: PRODUCT_TYPE
+        data_type: varchar
+      - name: product_category
+        synonyms: ["category"]
+        description: Product category
+        expr: PRODUCT_CATEGORY
+        data_type: varchar
+      - name: product_family
+        synonyms: ["family"]
+        description: Product family
+        expr: PRODUCT_FAMILY
+        data_type: varchar
+      - name: product_group
+        description: Product group
+        expr: PRODUCT_GROUP
+        data_type: varchar
+      - name: config_id
+        synonyms: ["configuration id"]
+        description: Configuration identifier
+        expr: CONFIG_ID
+        data_type: varchar
+      - name: config_name
+        synonyms: ["configuration", "config"]
+        description: Configuration name (Base/Standard/Premium)
+        expr: CONFIG_NAME
+        data_type: varchar
+      - name: config_type
+        synonyms: ["configuration type"]
+        description: Configuration type (STANDARD/CUSTOM)
+        expr: CONFIG_TYPE
+        data_type: varchar
+      - name: config_status
+        synonyms: ["status"]
+        description: Configuration status (ACTIVE/INACTIVE)
+        expr: CONFIG_STATUS
+        data_type: varchar
+      - name: is_default_config
+        synonyms: ["default"]
+        description: Default configuration flag
+        expr: IS_DEFAULT_CONFIG
+        data_type: varchar
+    measures:
+      - name: price
+        synonyms: ["unit price", "list price", "cost"]
+        description: Price for this product configuration - matches FACT_ORDER_HISTORY UNIT_PRICE
+        expr: UNIT_PRICE
+        data_type: decimal
+        default_aggregation: avg
+
+  # -------------------------
+  # VIEW: VW_PRODUCT_CATALOG_SIMPLE
+  # -------------------------
+  - name: product_catalog_simple
+    description: Simple product catalog without configuration details
+    base_table:
+      database: OrderLens
+      schema: INFORMATION_MART
+      table: PRODUCT_CATALOG_SIMPLE_VW
+    primary_key:
+      columns:
+        - PRODUCT_ID
+    dimensions:
+      - name: product_id
+        synonyms: ["product code", "material id"]
+        description: Product identifier
+        expr: PRODUCT_ID
+        data_type: varchar
+        unique: true
+      - name: product_name
+        synonyms: ["product", "item name"]
+        description: Product name
+        expr: PRODUCT_NAME
+        data_type: varchar
+      - name: material_type
+        synonyms: ["type"]
+        description: Material type
+        expr: MATERIAL_TYPE
+        data_type: varchar
+      - name: material_group
+        synonyms: ["group"]
+        description: Material group
+        expr: MATERIAL_GROUP
+        data_type: varchar
+      - name: product_hierarchy
+        synonyms: ["hierarchy"]
+        description: Product hierarchy
+        expr: PRODUCT_HIERARCHY
+        data_type: varchar
+      - name: unit_of_measure
+        synonyms: ["uom"]
+        description: Unit of measure
+        expr: UNIT_OF_MEASURE
+        data_type: varchar
+      - name: product_type
+        description: Product type
+        expr: PRODUCT_TYPE
+        data_type: varchar
+      - name: product_category
+        synonyms: ["category"]
+        description: Product category
+        expr: PRODUCT_CATEGORY
+        data_type: varchar
+      - name: product_family
+        synonyms: ["family"]
+        description: Product family
+        expr: PRODUCT_FAMILY
+        data_type: varchar
+      - name: product_group
+        description: Product group
+        expr: PRODUCT_GROUP
+        data_type: varchar
+
+  # -------------------------
+  # VIEW: VW_PRODUCT_BOM
+  # -------------------------
+  - name: product_bom
+    description: Bill of materials view for product component analysis
+    base_table:
+      database: OrderLens
+      schema: INFORMATION_MART
+      table: PRODUCT_BOM_VW
+    primary_key:
+      columns:
+        - PARENT_PRODUCT
+        - CHILD_PRODUCT
+    dimensions:
+      - name: parent_product
+        synonyms: ["parent", "assembly", "parent material"]
+        description: Parent product identifier
+        expr: PARENT_PRODUCT
+        data_type: varchar
+      - name: parent_product_name
+        synonyms: ["parent name", "assembly name"]
+        description: Parent product name
+        expr: PARENT_PRODUCT_NAME
+        data_type: varchar
+      - name: child_product
+        synonyms: ["child", "component", "child material"]
+        description: Component product identifier
+        expr: CHILD_PRODUCT
+        data_type: varchar
+      - name: child_product_name
+        synonyms: ["component name", "child name"]
+        description: Component product name
+        expr: CHILD_PRODUCT_NAME
+        data_type: varchar
+      - name: unit_of_measure
+        synonyms: ["uom"]
+        description: Component unit of measure
+        expr: UNIT_OF_MEASURE
+        data_type: varchar
+    measures:
+      - name: quantity_per_assembly
+        synonyms: ["quantity", "qty per"]
+        description: Component quantity per assembly
+        expr: QUANTITY_PER_ASSEMBLY
+        data_type: decimal
+        default_aggregation: sum
+      - name: scrap_factor
+        synonyms: ["scrap"]
+        description: Component scrap factor
+        expr: SCRAP_FACTOR
+        data_type: decimal
+        default_aggregation: avg
+
+  # -------------------------
+  # VIEW: VW_PRODUCT_FORECAST_KPI
+  # -------------------------
+  - name: forecast_kpi
+    description: Forecast KPI view built from sales history and demand plan - 6 month forward projection
+    base_table:
+      database: OrderLens
+      schema: INFORMATION_MART
+      table: PRODUCT_FORECAST_KPI_VW
+    primary_key:
+      columns:
+        - PRODUCT_ID
+        - FORECAST_PERIOD_END
+    dimensions:
+      - name: product_id
+        description: Product identifier
+        expr: PRODUCT_ID
+        data_type: varchar
+      - name: product_name
+        synonyms: ["product"]
+        description: Product name
+        expr: PRODUCT_NAME
+        data_type: varchar
+      - name: forecast_period_end
+        synonyms: ["forecast date", "period"]
+        description: Forecast period end date
+        expr: FORECAST_PERIOD_END
+        data_type: datetime2
+      - name: forecast_month
+        synonyms: ["month"]
+        description: Forecast month
+        expr: "DATEADD(month, DATEDIFF(month, 0, FORECAST_PERIOD_END), 0)"
+        data_type: datetime2
+      - name: forecast_quarter
+        synonyms: ["quarter"]
+        description: Forecast quarter
+        expr: "DATEPART(QUARTER, FORECAST_PERIOD_END)"
+        data_type: NUMBER
+      - name: forecast_year
+        synonyms: ["year"]
+        description: Forecast year
+        expr: "DATEPART(YEAR, FORECAST_PERIOD_END)"
+        data_type: NUMBER
+    measures:
+      - name: forecast_quantity
+        synonyms: ["predicted units", "forecasted qty", "forecast qty"]
+        description: Forecasted quantity (blended from demand plan and sales history)
+        expr: FORECAST_QUANTITY
+        data_type: decimal
+        default_aggregation: sum
+      - name: forecast_revenue
+        synonyms: ["forecasted sales", "predicted revenue"]
+        description: Forecasted revenue
+        expr: FORECAST_REVENUE
+        data_type: decimal
+        default_aggregation: sum
+
+# -------------------------
+# RELATIONSHIPS
+# -------------------------
+relationships:
+  # Order History to Products
+  - name: order_history_to_product
+    left_table: order_history
+    right_table: products
+    relationship_columns:
+      - left_column: PRODUCT_ID
+        right_column: PRODUCT_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+
+  # Order History to Dealers
+  - name: order_history_to_dealer
+    left_table: order_history
+    right_table: dealers
+    relationship_columns:
+      - left_column: DEALER_ID
+        right_column: DEALER_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+
+  # Order History to Customers
+  - name: order_history_to_customer
+    left_table: order_history
+    right_table: customers
+    relationship_columns:
+      - left_column: CUSTOMER_ID
+        right_column: CUSTOMER_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+
+  # Dealer Order KPI to Products
+  - name: dealer_kpi_to_product
+    left_table: dealer_order_kpi
+    right_table: products
+    relationship_columns:
+      - left_column: PRODUCT_ID
+        right_column: PRODUCT_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+
+  # Dealer Order KPI to Dealers
+  - name: dealer_kpi_to_dealer
+    left_table: dealer_order_kpi
+    right_table: dealers
+    relationship_columns:
+      - left_column: DEALER_ID
+        right_column: DEALER_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+
+  # Product Catalog to Products
+  - name: catalog_to_product
+    left_table: product_catalog
+    right_table: products
+    relationship_columns:
+      - left_column: PRODUCT_ID
+        right_column: PRODUCT_ID
+    join_type: inner
+    relationship_type: many_to_one
+
+  # Forecast KPI to Products
+  - name: forecast_to_product
+    left_table: forecast_kpi
+    right_table: products
+    relationship_columns:
+      - left_column: PRODUCT_ID
+        right_column: PRODUCT_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+
+  # Product BOM Parent to Products
+  - name: bom_parent_to_product
+    left_table: product_bom
+    right_table: products
+    relationship_columns:
+      - left_column: PARENT_PRODUCT
+        right_column: PRODUCT_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+
+  # Product BOM Child to Products
+  - name: bom_child_to_product
+    left_table: product_bom
+    right_table: products
+    relationship_columns:
+      - left_column: CHILD_PRODUCT
+        right_column: PRODUCT_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+
+  # Dealers to Customers (dealers are a subset)
+  - name: dealer_to_customer
+    left_table: dealers
+    right_table: customers
+    relationship_columns:
+      - left_column: DEALER_ID
+        right_column: CUSTOMER_ID
+    join_type: inner
+    relationship_type: one_to_one
