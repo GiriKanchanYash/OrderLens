@@ -84,7 +84,7 @@ UI_INFO_BG = "#e0f2fe"
 UI_INFO_BORDER = "#bae6fd"
 
 # ── NEUTRAL COLOURS ───────────────────────────────────────────────────────────
-UI_BG = "#F8FAFC"      # App background
+UI_BG = "#FFFFFF"      # App background
 UI_PANEL = "#FFFFFF"      # Card / container surface
 UI_TEXT = "#0F172A"      # Primary text
 UI_TEXT_SUBTLE = "#475569"      # Secondary text
@@ -117,18 +117,18 @@ UI_SHADOW_2 = "0 2px 10px rgba(2,8,23,.06)"
 UI_SHADOW_CARD = "0 2px 8px rgba(0,0,0,.04), 0 1px 2px rgba(0,0,0,.06)"
 UI_FONT_FAMILY = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto"
 UI_KPI_LABEL_SIZE = "0.70rem"
-UI_KPI_VALUE_SIZE = "1.75rem"
-UI_TAB_FONT_SIZE = "0.9rem"
+UI_KPI_VALUE_SIZE = "2.2rem"
+UI_TAB_FONT_SIZE = "1rem"
 UI_TAB_FONT_WEIGHT = "600"
 UI_CHAT_FONT_SIZE = "14px"
 UI_CHAT_BUBBLE_MAX = "76%"
-UI_LOGO_HEIGHT = "120px"
+UI_LOGO_HEIGHT = "86px"
 
 # ── CHAT WINDOW ───────────────────────────────────────────────────────────────
 UI_CHAT_SCROLL_HEIGHT = 520          # px — increase for a taller chat window
 
 # ── THEME BG PICKER ───────────────────────────────────────────────────────────
-UI_THEME_DEFAULT_BG = "#FBF9F4"
+UI_THEME_DEFAULT_BG = "#FFFFFF"
 UI_THEME_BTN_COLOR = "#1E40AF"
 UI_THEME_BTN_SIZE = "44px"
 UI_THEME_BOTTOM = "18px"
@@ -174,7 +174,7 @@ def _build_all_css() -> str:
 * {{ font-family: {UI_FONT_FAMILY}; }}
 html,body,[class^="css"]{{ background:var(--bg); color:var(--text); }}
 .main {{ padding:0; background:var(--bg); }}
-.block-container {{ padding-top:1.5rem!important; padding-left:2rem!important; padding-right:2rem!important; max-width:{UI_MAX_WIDTH}; margin:0 auto; }}
+.block-container {{ padding-top:0.8rem!important; padding-left:1.2rem!important; padding-right:1.2rem!important; max-width:{UI_MAX_WIDTH}; margin:0 auto; }}
 .stApp>header+div {{ padding-top:0!important; }}
 .stMainBlockContainer {{ padding-top:1rem!important; }}
 #MainMenu {{ visibility:hidden; }}
@@ -186,34 +186,66 @@ section[data-testid="stSidebar"] {{ display:none; }}
 [data-testid="column"]:has(>div>div>div[style*="yash-header-logo"]) {{ display:flex!important; align-items:center!important; }}
 .stHorizontalBlock:first-of-type {{ align-items:center!important; }}
 .kpi-row {{ display:grid; grid-template-columns:repeat(6,1fr); gap:16px; margin-bottom:30px; }}
-.kpi-card {{ border-radius:16px; padding:20px; position:relative; }}
+.kpi-card {{ border-radius:14px; padding:16px 18px; position:relative; min-height:132px; box-shadow:0 1px 2px rgba(15,23,42,.06); border:1px solid rgba(148,163,184,.18); }}
 .kpi-card-green  {{ background:linear-gradient(135deg,{UI_KPI_GREEN[0]}  0%,{UI_KPI_GREEN[1]}  100%); }}
 .kpi-card-purple {{ background:linear-gradient(135deg,{UI_KPI_PURPLE[0]} 0%,{UI_KPI_PURPLE[1]} 100%); }}
 .kpi-card-cyan   {{ background:linear-gradient(135deg,{UI_KPI_CYAN[0]}   0%,{UI_KPI_CYAN[1]}   100%); }}
 .kpi-card-blue   {{ background:linear-gradient(135deg,{UI_KPI_BLUE[0]}   0%,{UI_KPI_BLUE[1]}   100%); }}
 .kpi-card-yellow {{ background:linear-gradient(135deg,{UI_KPI_YELLOW[0]} 0%,{UI_KPI_YELLOW[1]} 100%); }}
 .kpi-card-lime   {{ background:linear-gradient(135deg,{UI_KPI_LIME[0]}   0%,{UI_KPI_LIME[1]}   100%); }}
-.kpi-label {{ font-size:{UI_KPI_LABEL_SIZE}; font-weight:600; color:#374151; text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px; }}
-.kpi-value {{ font-size:{UI_KPI_VALUE_SIZE}; font-weight:800; color:#1F2937; margin-bottom:8px; }}
-.kpi-change {{ font-size:0.8rem; display:flex; align-items:center; gap:4px; }}
-.kpi-change.positive {{ color:{UI_SUCCESS}; }}
-.kpi-change.negative {{ color:{UI_DANGER}; }}
-.kpi-change.neutral  {{ color:{UI_TEXT}; }}
+.kpi-label {{ font-size:0.75rem; font-weight:700; color:#4B5563; text-transform:uppercase; letter-spacing:.4px; margin-bottom:10px; }}
+.kpi-value {{ font-size:{UI_KPI_VALUE_SIZE}; font-weight:800; color:#111827; margin-bottom:8px; line-height:1.05; }}
+.kpi-change {{ font-size:0.95rem; display:flex; align-items:center; gap:4px; font-weight:600; }}
+.kpi-change.positive {{ color:#DC2626; }}
+.kpi-change.negative {{ color:#DC2626; }}
+.kpi-change.neutral  {{ color:#475569; }}
+.welcome-title {{ font-size:2rem; font-weight:700; color:#1F2937; margin:4px 0 10px 0; }}
 .nav-tab {{ padding:10px 20px; border-radius:8px; font-weight:{UI_TAB_FONT_WEIGHT}; font-size:{UI_TAB_FONT_SIZE}; cursor:pointer; transition:all .2s; color:#4B5563; background:transparent; border:none; }}
 .nav-tab:hover {{ background:#F3F4F6; }}
 .nav-tab.active {{ background:{UI_BRAND}; color:white; }}
-.dashboard-tabs {{ background:transparent; padding:8px 0; display:flex; gap:4px; width:100%; }}
+.dashboard-tabs {{ background:transparent; padding:8px 0; display:flex; gap:10px; width:100%; }}
 .dashboard-tabs .stButton {{ flex:1; }}
-.dashboard-tabs .stButton>button {{ background:transparent; color:{UI_BRAND}; border:none; border-radius:6px; padding:12px 18px; font-size:{UI_TAB_FONT_SIZE}; font-weight:{UI_TAB_FONT_WEIGHT}; width:100%; transition:all .2s; }}
-.dashboard-tabs .stButton>button:hover {{ background:rgba(37,99,235,.1); }}
-.dashboard-tabs .stButton>button[kind="primary"] {{ background:{UI_BRAND}; color:white; border:none; }}
+.dashboard-tabs .stButton>button {{ background:#FFFFFF; color:#4B5563; border:1px solid #D1D5DB; border-radius:10px; padding:12px 18px; font-size:{UI_TAB_FONT_SIZE}; font-weight:{UI_TAB_FONT_WEIGHT}; width:100%; transition:all .2s; }}
+.dashboard-tabs .stButton>button:hover {{ background:#F8FAFC; }}
+.dashboard-tabs .stButton>button[kind="primary"] {{ background:{UI_BRAND}; color:white; border:1px solid {UI_BRAND}; }}
 div[data-testid="stVerticalBlockBorderWrapper"] {{ background:var(--panel); border-radius:{UI_RADIUS_SM}; padding:20px 24px 16px 24px; box-shadow:var(--shadow-card); border:1px solid #F3F4F6; margin-bottom:16px; height:100%; }}
 .chart-title {{ font-size:1.1rem; font-weight:700; color:#111827; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid #F3F4F6; }}
 [data-testid="stTabs"] {{ width:100%; }}
 [data-testid="stTabs"]>div>div {{ background:#e0efff; padding:8px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,.1); }}
 [data-testid="stTabs"] button[aria-selected="true"]  {{ background:{UI_BRAND}!important; color:white!important; border-radius:6px; font-weight:600; }}
 [data-testid="stTabs"] button[aria-selected="false"] {{ background:transparent!important; color:{UI_BRAND}!important; border-radius:6px; font-weight:600; }}
-.stButton>button {{ border-radius:8px; font-weight:600; transition:all .2s; }}
+.stButton>button {{ border-radius:10px; font-weight:600; transition:all .2s; min-height:42px; }}
+div[data-testid="column"]:has(button[data-testid*="baseButton-nav_"]) button {{
+  border:1px solid #D1D5DB !important;
+  background:#FFFFFF !important;
+  color:#374151 !important;
+  font-weight:600 !important;
+  border-radius:10px !important;
+  min-height:42px !important;
+}}
+div[data-testid="column"]:has(button[data-testid*="baseButton-nav_"]) button[kind="primary"] {{
+  background:{UI_BRAND} !important;
+  color:#FFFFFF !important;
+  border-color:{UI_BRAND} !important;
+}}
+div[data-testid="column"]:has(button[data-testid*="baseButton-t"]) button {{
+  border:1px solid #D1D5DB !important;
+  background:#FFFFFF !important;
+  color:#374151 !important;
+  border-radius:10px !important;
+  min-height:42px !important;
+}}
+div[data-testid="column"]:has(button[data-testid*="baseButton-t"]) button[kind="primary"] {{
+  background:{UI_BRAND} !important;
+  color:#FFFFFF !important;
+  border-color:{UI_BRAND} !important;
+}}
+div[data-testid="stDateInput"] input, div[data-testid="stSelectbox"] div[data-baseweb="select"] {{
+  border-radius:10px !important;
+  border:1px solid #D1D5DB !important;
+  background:#FFFFFF !important;
+  min-height:42px !important;
+}}
 .theme-anchor {{ position:fixed; bottom:{UI_THEME_BOTTOM}; right:{UI_THEME_RIGHT}; z-index:1000000; display:flex; align-items:center; justify-content:center; width:{UI_THEME_BTN_SIZE}; height:{UI_THEME_BTN_SIZE}; border-radius:50%; background-color:{UI_THEME_BTN_COLOR}; border:none; box-shadow:0 4px 12px rgba(15,23,42,.2); font-size:11px; font-weight:700; color:#fff; cursor:pointer; letter-spacing:.5px; }}
 .theme-anchor:hover {{ transform:scale(1.1); box-shadow:0 6px 16px rgba(15,23,42,.3); }}
 .theme-anchor .theme-label-text {{ pointer-events:none; }}
@@ -474,22 +506,49 @@ def load_clean_ui_light():
     .badge.med{  background:#fff4e5; color:#b54708; border-color:#f7cf97; }
     .badge.low{  background:#ecfdf3; color:#067647; border-color:#a6f0c6; }
 
-    /* KPI tiles */
-    .kpi{
-      background: #fff;
-      border: 1px solid #e6e8ee;
-      border-radius: var(--radius-sm);
-      padding: 14px 14px 10px 14px;
-      box-shadow: var(--shadow-2);
-      width: 100%;
-      min-height: 110px;
+    /* KPI tiles (native Streamlit metrics) */
+    [data-testid="stMetric"]{
+      border-radius: 14px;
+      padding: 12px 14px;
+      border: 1px solid rgba(148,163,184,.20);
+      box-shadow: 0 1px 2px rgba(15,23,42,.06);
+      min-height: 126px;
+      background: #ffffff;
     }
-    .kpi .title{ font-size: var(--kpi-title); color: var(--muted); letter-spacing: .3px; font-weight: 800; }
-    .kpi .value{ font-size: var(--kpi-value); font-weight: 900; margin-top: 6px; display:flex; align-items:baseline; gap:8px; }
-    .kpi .delta{ margin-top: 4px; font-weight: 900; display:flex; align-items:center; gap:6px; letter-spacing:.2px; }
-    .kpi .delta .delta-icon { display:inline-flex; width:16px; height:16px; }
-    .kpi .delta.up{ color: var(--success); }  /* green */
-    .kpi .delta.down{ color: var(--danger); } /* red */
+    [data-testid="stMetricLabel"] p{
+      font-size: 0.74rem !important;
+      letter-spacing: .35px !important;
+      color: #4B5563 !important;
+      font-weight: 700 !important;
+    }
+    [data-testid="stMetricValue"] > div{
+      font-size: 2.1rem !important;
+      font-weight: 800 !important;
+      color: #111827 !important;
+      line-height: 1.05 !important;
+    }
+    [data-testid="stMetricDelta"] > div{
+      font-size: 0.9rem !important;
+      font-weight: 600 !important;
+    }
+    .st-key-kpi1 [data-testid="stMetric"]{
+      background: linear-gradient(135deg,#D1FAE5 0%,#A7F3D0 100%);
+    }
+    .st-key-kpi2 [data-testid="stMetric"]{
+      background: linear-gradient(135deg,#EDE9FE 0%,#DDD6FE 100%);
+    }
+    .st-key-kpi3 [data-testid="stMetric"]{
+      background: linear-gradient(135deg,#CFFAFE 0%,#A5F3FC 100%);
+    }
+    .st-key-kpi4 [data-testid="stMetric"]{
+      background: linear-gradient(135deg,#DBEAFE 0%,#BFDBFE 100%);
+    }
+    .st-key-kpi5 [data-testid="stMetric"]{
+      background: linear-gradient(135deg,#FEF3C7 0%,#FDE68A 100%);
+    }
+    .st-key-kpi6 [data-testid="stMetric"]{
+      background: linear-gradient(135deg,#ECFCCB 0%,#D9F99D 100%);
+    }
 
     /* Empty state */
     .empty{
@@ -1091,7 +1150,7 @@ def apply_custom_theme_picker(default_color: str = "#FBF9F4", link_text: str = "
 
 # Initialize the background‑color picker once at the top level
 apply_custom_theme_picker(link_text="BG")
-st.markdown(load_clean_ui_light(), unsafe_allow_html=True)
+load_clean_ui_light()
 
 
 # Helper function to run queries
@@ -2945,7 +3004,7 @@ with header_cols[0]:
 
 # Center: Navigation (Dashboard, Genie, Order Life Cycle, Forecast)
 with header_cols[1]:
-    nav_cols = st.columns([1, 1, 1.2, 1])
+    nav_cols = st.columns([1, 1, 1.2, 1, 1])
 
     with nav_cols[0]:
         if st.button("Dashboard", key="nav_dash",
@@ -2975,6 +3034,13 @@ with header_cols[1]:
             st.session_state.current_page = "Forecast"
             st.rerun()
 
+    with nav_cols[4]:
+        if st.button("AI Agents", key="nav_ai",
+                     type="primary" if st.session_state.current_page == "AI Agents" else "secondary",
+                     use_container_width=True):
+            st.session_state.current_page = "AI Agents"
+            st.rerun()
+
 # Right: YASH Technologies logo (embedded in this file — no external file or URL)
 with header_cols[2]:
     st.markdown(f"""
@@ -2999,9 +3065,9 @@ if st.session_state.current_page == "Dashboard":
     MIN_DATE = date(2024, 1, 1)
 
     if "time_filter" not in st.session_state:
-        st.session_state.time_filter = "Last 30 Days"
+        st.session_state.time_filter = "YTD"
     if "start_date" not in st.session_state:
-        st.session_state.start_date = TODAY - timedelta(days=30)
+        st.session_state.start_date = date(TODAY.year, 1, 1)
     if "end_date" not in st.session_state:
         st.session_state.end_date = TODAY
 
@@ -3258,58 +3324,34 @@ if st.session_state.current_page == "Dashboard":
     kpi_col1, kpi_col2, kpi_col3, kpi_col4, kpi_col5, kpi_col6 = st.columns(6)
 
     with kpi_col1:
-        st.markdown(f"""
-        <div class="kpi-card kpi-card-green">
-            <div class="kpi-label">TOTAL REVENUE</div>
-            <div class="kpi-value">${revenue_current/1000000:.1f}M</div>
-            <div class="kpi-change {revenue_class}">{revenue_change} vs last period</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(key="kpi1"):
+            st.metric("TOTAL REVENUE", f"${revenue_current/1000000:.1f}M",
+                      f"{revenue_change} vs last period", delta_color="inverse")
 
     with kpi_col2:
-        st.markdown(f"""
-        <div class="kpi-card kpi-card-purple">
-            <div class="kpi-label">TOTAL ORDERS</div>
-            <div class="kpi-value">{orders_current:,}</div>
-            <div class="kpi-change {orders_class}">{orders_change} vs last period</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(key="kpi2"):
+            st.metric("TOTAL ORDERS", f"{orders_current:,}",
+                      f"{orders_change} vs last period", delta_color="inverse")
 
     with kpi_col3:
-        st.markdown(f"""
-        <div class="kpi-card kpi-card-cyan">
-            <div class="kpi-label">AVERAGE ORDER VALUE</div>
-            <div class="kpi-value">${aov_current:,.0f}</div>
-            <div class="kpi-change {aov_class}">{aov_change} vs last period</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(key="kpi3"):
+            st.metric("AVERAGE ORDER VALUE", f"${aov_current:,.0f}",
+                      f"{aov_change} vs last period", delta_color="inverse")
 
     with kpi_col4:
-        st.markdown(f"""
-        <div class="kpi-card kpi-card-blue">
-            <div class="kpi-label">ACTIVE DEALERS</div>
-            <div class="kpi-value">{dealers_current:,}</div>
-            <div class="kpi-change {dealers_class}">{dealers_change} vs last period</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(key="kpi4"):
+            st.metric("ACTIVE DEALERS", f"{dealers_current:,}",
+                      f"{dealers_change} vs last period", delta_color="inverse")
 
     with kpi_col5:
-        st.markdown(f"""
-        <div class="kpi-card kpi-card-yellow">
-            <div class="kpi-label">ACTIVE PRODUCTS</div>
-            <div class="kpi-value">{products_current:,}</div>
-            <div class="kpi-change {products_class}">{products_change} vs last period</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(key="kpi5"):
+            st.metric("ACTIVE PRODUCTS", f"{products_current:,}",
+                      f"{products_change} vs last period", delta_color="inverse")
 
     with kpi_col6:
-        st.markdown(f"""
-        <div class="kpi-card kpi-card-lime">
-            <div class="kpi-label">TOTAL UNITS</div>
-            <div class="kpi-value">{units_current:,}</div>
-            <div class="kpi-change {units_class}">{units_change} vs last period</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(key="kpi6"):
+            st.metric("TOTAL UNITS", f"{units_current:,}",
+                      f"{units_change} vs last period", delta_color="inverse")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -4210,7 +4252,7 @@ if st.session_state.current_page == "Dashboard":
                 st.info("No features by product type data available")
 
 # ============== GENIE PAGE (match another_app_for _bg.py exactly) ==============
-elif st.session_state.current_page == "Genie":
+elif st.session_state.current_page in ("Genie", "AI Agents"):
 
     def _cortex_complete_prescriptive_from_dfs(dfs, question, context_text=""):
         """Call Cortex to generate prescriptive from a list of dataframes."""
@@ -4503,7 +4545,7 @@ elif st.session_state.current_page == "Genie":
                     <div style="font-size:12px;color:#64748b;line-height:1.4;">{analysis['desc']}</div>
                 </div>
                 """, unsafe_allow_html=True)
-                if st.form_submit_button("Select", use_container_width=True):
+                if st.form_submit_button("AskGenie", use_container_width=True):
                     clicked_key = key
 
     if clicked_key is not None:
