@@ -1299,6 +1299,141 @@ def _get_app_owner_role() -> str:
     """Not used in Fabric/Azure deployment"""
     return "UNKNOWN"
 
+def _load_user_chat_dates() -> list:
+    """Fetches chat dates and GENIE query counts for the last 7 days."""
+
+    try:
+        current_user = _get_current_user_raw() or "UNKNOWN"
+        user_esc = _sql_escape(current_user)
+
+        WH_TBL = f"[{Config.WAREHOUSE_SCHEMA}].[{Config.GENIE_CONTEXT_MEMORY_TABLE}]"
+
+        sql = f"""
+            SELECT
+                [ChatDate],
+                COUNT(*) AS QueryCount,
+                MAX([CreatedAt]) AS LastMessageAt
+            FROM {WH_TBL}
+            WHERE
+                UPPER([Username]) = UPPER('{user_esc}')
+                AND [Action_Type] = 'GENIE_QUERY'
+                AND [ChatDate] >= DATEADD(DAY, -7, CAST(GETDATE() AS DATE))
+            GROUP BY
+                [ChatDate]
+            ORDER BY
+                [ChatDate] DESC;
+        """
+
+        df = run_warehouse_df(sql)
+
+        if df is None or df.empty:
+            return []
+
+        return [
+            {
+                "ChatDate": str(row["ChatDate"]),
+                "count": int(row["QueryCount"]),
+                "last_message_at": str(row["LastMessageAt"])
+            }
+            for _, row in df.iterrows()
+        ]
+
+    except Exception as e:
+        st.warning(f"Could not load query history: {e}")
+        return []
+
+def generate_context_summary(
+    question: str,
+    full_answer: str,
+    sql_query: str
+) -> str:
+    """
+    Uses AI to generate a concise 2–3 line context summary
+    based on the user's question, executed SQL, and full analytical answer.
+    Intended for chat history, memory, or context recall.
+    """
+
+    try:
+        prompt = f"""
+
+            You are generating a short-term analytical memory.
+
+            Create a 2–3 sentence CONTEXT SUMMARY.
+
+            INPUT:
+            Question:
+            {question}
+
+            Answer:
+            {full_answer}
+
+            SQL Query:
+            {sql_query}
+
+            RULES:
+            - Ignore recommendations and prescriptive guidance
+            - Capture:
+            1) Analytical intent
+            2) Data analyzed
+            3) Key conclusion
+            - No bullet points, no numbers unless critical
+            - Neutral, factual language
+            - Max 3 sentences
+            - Output only the summary text
+        """
+
+        summary = cortex_complete(prompt, temperature=0.2)
+
+        return (summary or "").strip()
+
+    except Exception as e:
+        return f"Summary generation failed: {str(e)}"
+
+def _load_queries_by_date(chat_date: str) -> list:
+    """Fetches all queries for a specific date."""
+    try:
+        current_user = _get_current_user_raw() or "UNKNOWN"
+        WH_TBL = f"[{Config.WAREHOUSE_SCHEMA}].[{Config.GENIE_CONTEXT_MEMORY_TABLE}]"
+        
+        sql = f"""
+           SELECT
+                [Question],
+                [AnswerSummary],
+                [FullAnswer],
+                [Sql_Query],
+                [Action_Type],
+                [Action_Details],
+                [ChatDate]
+            FROM {WH_TBL}
+            WHERE UPPER(Username) = UPPER('{current_user}') AND [ChatDate] = '{chat_date}' AND [Action_Type] IN ('GENIE_QUERY');
+        """
+        
+        df = run_warehouse_df(sql)
+        
+        if df is None or df.empty:
+            return []
+        
+        return [
+            {
+                "question": (str(row.get("Question") or "")).strip(),
+                "summary": (str(row.get("AnswerSummary") or "")).strip(),
+                "full_answer": (str(row.get("FullAnswer") or "")).strip(),
+                "sql": (str(row.get("Sql_Query") or "")).strip(),
+                "action_type": (str(row.get("Action_Type") or "")).strip(),
+                "action_details": (str(row.get("Action_Details") or "")).strip()
+            }
+            for _, row in df.iterrows()
+        ]
+    except Exception as e:
+        st.warning(f"Could not load chat history for date {chat_date}: {e}")
+        return []
+
+    if preset == "QTD":
+        start = date(today.year, ((today.month - 1)//3)*3 + 1, 1)
+        return start, today
+    if preset == "YTD":
+        return date(today.year, 1, 1), today
+    return today.replace(day=1), today  # Current month
 
 def _append_genie_question(query: str, analysis_type: str):
     q = query.strip()
