@@ -4,12 +4,13 @@ import streamlit as st
 import hashlib
 import logging
 from datetime import datetime
-from db_service import run_warehouse_non_query,run_warehouse_df
-
-logger = logging.getLogger(__name__)
+from __future__ import annotations
 from config import Config
+import config
+from db_service import run_warehouse_non_query, run_warehouse_df
 
-WH = Config.WAREHOUSE_SCHEMA 
+WH = f"[{Config.FABRIC_ORDERLENS_WAREHOUSE_DATABASE}].[{Config.DEFAULT_SCHEMA}]"  # "dbo"
+logger = logging.getLogger(__name__)
 # -------------------------------
 # Context Management
 # -------------------------------
