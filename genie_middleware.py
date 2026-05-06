@@ -1,15 +1,13 @@
 # genie_middleware.py
-
+from __future__ import annotations
 import streamlit as st
 import hashlib
 import logging
-from datetime import datetime
-from __future__ import annotations
 from config import Config
-import config
 from db_service import run_warehouse_non_query, run_warehouse_df
 
-WH = f"[{Config.FABRIC_ORDERLENS_WAREHOUSE_DATABASE}].[{Config.DEFAULT_SCHEMA}]"  # "dbo"
+WH = f"[{Config.FABRIC_ORDERLENS_WAREHOUSE_DATABASE}].[{Config.DEFAULT_SCHEMA}]"
+GENIE_CONTEXT_MEMORY_TABLE = Config.GENIE_CONTEXT_MEMORY_TABLE
 logger = logging.getLogger(__name__)
 # -------------------------------
 # Context Management
@@ -31,6 +29,12 @@ def _sql_escape(val):
     if val is None:
         return ""
     return str(val).replace("'", "''")
+
+
+def _fit_col(val: str, max_len: int) -> str:
+    """Trim text to the target VARCHAR length."""
+    txt = "" if val is None else str(val)
+    return txt[:max_len]
 
 
 def generate_context_hash(question: str, user: str):
@@ -60,15 +64,29 @@ def log_event(event_type: str, payload: dict):
 
         relevance = payload.get("relevance", 0.0)
 
-        user_esc = _sql_escape(user)
+        username = _fit_col(user, 100)
+        user_id = _fit_col(user, 64)
+        user_esc = _sql_escape(username)
+        user_id_esc = _sql_escape(user_id)
         question_esc = _sql_escape(question)
 
-        #get existing frequency
-        existing_frequency = get_existing_question_frequency(question_esc, user_esc)
-        new_frequency = existing_frequency + 1
+        # Frequency is per (question, user). Allow caller to pin it so
+        # multiple events in the same request share one frequency value.
+        payload_frequency = payload.get("frequency")
+        if payload_frequency is not None:
+            try:
+                new_frequency = max(1, int(payload_frequency))
+            except (TypeError, ValueError):
+                existing_frequency = get_existing_question_frequency(
+                    question_esc, user_esc
+                )
+                new_frequency = existing_frequency + 1
+        else:
+            existing_frequency = get_existing_question_frequency(question_esc, user_esc)
+            new_frequency = existing_frequency + 1
 
         sql = f"""
-        INSERT INTO [{WH}].[{Config.GENIE_CONTEXT_MEMORY_TABLE}] (
+        INSERT INTO {GENIE_CONTEXT_MEMORY_TABLE} (
             SessionId,
             Username,
             user_id,
@@ -93,7 +111,7 @@ def log_event(event_type: str, payload: dict):
         VALUES (
             '{session_id}',
             '{user_esc}',
-            '{user_esc}',
+            '{user_id_esc}',
             '{question_esc}',
             '{summary}',
             '{full}',
@@ -116,19 +134,6 @@ def log_event(event_type: str, payload: dict):
 
         run_warehouse_non_query(sql)
 
-        
-        update_frequency = f"""
-        UPDATE [{WH}].[{Config.GENIE_CONTEXT_MEMORY_TABLE}]
-        SET
-            Frequency = {new_frequency},
-            Last_Accessed_At = GETDATE(),
-            UpdatedAt = GETDATE()
-        WHERE [Question] = '{question}'
-        AND Username = '{user_esc}';
-        """
-
-        run_warehouse_non_query(update_frequency)
-
     except Exception as e:
         logger.warning(f"[Middleware] Logging failed: {e}")
 
@@ -137,7 +142,7 @@ def get_existing_question_frequency(question: str, user: str) -> int:
     try:
         sql = f"""
         SELECT ISNULL(MAX(Frequency), 0) AS maxFrequency
-        FROM [{WH}].[{Config.GENIE_CONTEXT_MEMORY_TABLE}]
+        FROM {GENIE_CONTEXT_MEMORY_TABLE}
         WHERE Question = '{question}'
           AND Username = '{user}'
         """
@@ -183,16 +188,19 @@ def log_events_upsert(event_type: str, payload: dict):
 
         relevance = payload.get("relevance", 0.0)
 
-        user_esc = _sql_escape(user)
+        username = _fit_col(user, 100)
+        user_id = _fit_col(user, 64)
+        user_esc = _sql_escape(username)
+        user_id_esc = _sql_escape(user_id)
         question_esc = _sql_escape(question)
 
         sql = f"""
-        MERGE [{WH}].[{Config.GENIE_CONTEXT_MEMORY_TABLE}] AS target
+        MERGE {GENIE_CONTEXT_MEMORY_TABLE} AS target
         USING (
             SELECT
                 '{session_id}' AS SessionId,
                 '{user_esc}' AS Username,
-                '{user_esc}' AS user_id,
+                '{user_id_esc}' AS user_id,
                 '{question_esc}' AS Question,
                 '{context_hash}' AS Context_Hash
         ) AS source
@@ -225,7 +233,7 @@ def log_events_upsert(event_type: str, payload: dict):
                 ChatDate, CreatedAt, UpdatedAt
             )
             VALUES (
-                '{session_id}', '{user_esc}', '{user_esc}', '{question_esc}',
+                '{session_id}', '{user_esc}', '{user_id_esc}', '{question_esc}',
                 '{summary}', '{full}', '{context_hash}',
                 '{sql_query}', '{tables}', '{filters}',
                 {relevance}, 1, GETDATE(),

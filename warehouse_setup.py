@@ -20,12 +20,14 @@ from __future__ import annotations
 import logging
 
 from config import Config
-import config
 from db_service import run_warehouse_non_query, run_warehouse_df
 
 logger = logging.getLogger(__name__)
 
-WH = Config.DEFAULT_SCHEMA  # "dbo"
+
+WH_DATABASE = Config.FABRIC_ORDERLENS_WAREHOUSE_DATABASE
+WH_SCHEMA = Config.DEFAULT_SCHEMA
+WH = f"[{WH_DATABASE}].[{WH_SCHEMA}]"
 
 # Timestamp expression used in all INSERTs/UPDATEs
 # FORMAT 120 = 'YYYY-MM-DD HH:MI:SS'
@@ -34,11 +36,11 @@ TS = "CONVERT(VARCHAR(30), GETDATE(), 120)"
 
 # ── DDL ───────────────────────────────────────────────────────────────────────
 _DDL_LONG_TERM_MEMORY = f"""
-CREATE TABLE [{WH}].[{Config.GENIE_CONTEXT_MEMORY_TABLE}](
+CREATE TABLE {Config.GENIE_CONTEXT_MEMORY_TABLE}(
                     ChatId            BIGINT IDENTITY NOT NULL,
                     SessionId         VARCHAR(64)  NOT NULL,
                     Username          VARCHAR(100) NOT NULL,
-                    user_id           VARCHAR(64)  NOT NULL,
+                    user_id           VARCHAR(256) NOT NULL,
                     Question          VARCHAR(MAX) NOT NULL,
                     AnswerSummary     VARCHAR(MAX) NULL,
                     FullAnswer        VARCHAR(MAX) NULL,
@@ -62,14 +64,23 @@ CREATE TABLE [{WH}].[{Config.GENIE_CONTEXT_MEMORY_TABLE}](
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def _base_table_name(table_name: str) -> str:
+    """Return bare table name from either qualified or unqualified input."""
+    cleaned = table_name.strip()
+    if "." not in cleaned:
+        return cleaned.strip("[]")
+    return cleaned.split(".")[-1].strip("[]")
+
+
 def _table_exists(table_name: str) -> bool:
     """Return True if the table already exists in the Warehouse schema."""
+    table_only = _base_table_name(table_name)
     try:
         df = run_warehouse_df(f"""
             SELECT COUNT(*) AS CNT
             FROM   INFORMATION_SCHEMA.TABLES
-            WHERE  TABLE_SCHEMA = '{WH}'
-              AND  TABLE_NAME   = '{table_name}'
+            WHERE  TABLE_SCHEMA = '{WH_SCHEMA}'
+              AND  TABLE_NAME   = '{table_only}'
         """)
         if df.empty:
             return False
@@ -81,20 +92,21 @@ def _table_exists(table_name: str) -> bool:
 
 def _create_table(table_name: str, ddl: str) -> str:
     """Create a single table. Returns 'ok', 'exists', or 'error: <msg>'."""
+    table_only = _base_table_name(table_name)
     if _table_exists(table_name):
-        logger.info("Table [%s].[%s] already exists.", WH, table_name)
+        logger.info("Table %s.[%s] already exists.", WH, table_only)
         return "exists"
     try:
         run_warehouse_non_query(ddl)
         if _table_exists(table_name):
-            logger.info("Table [%s].[%s] created.", WH, table_name)
+            logger.info("Table %s.[%s] created.", WH, table_only)
             return "ok"
         return "error: table not found after CREATE"
     except Exception as exc:
         msg = str(exc)
         if "already exists" in msg.lower():
             return "exists"
-        logger.error("Failed to create [%s].[%s]: %s", WH, table_name, msg)
+        logger.error("Failed to create %s.[%s]: %s", WH, table_only, msg)
         return f"error: {msg}"
 
 

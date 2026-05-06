@@ -17,19 +17,15 @@ import re
 import textwrap
 from typing import Dict, List, Optional
 
-import pandas as pd
 import yaml
 from openai import AzureOpenAI
 
 from config import Config
 from db_service import (
     cache_get,
-    cache_set,
     get_table_columns,
     get_primary_keys,
     list_tables_in_schema,
-    run_df,
-    sql_escape,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,11 +34,34 @@ logger = logging.getLogger(__name__)
 # Azure OpenAI client
 # ---------------------------------------------------------------------------
 
-_client = AzureOpenAI(
-    azure_endpoint=Config.AZURE_OPENAI_ENDPOINT,
-    api_key=Config.AZURE_OPENAI_API_KEY,
-    api_version=Config.AZURE_OPENAI_API_VERSION,
-)
+_client: Optional[AzureOpenAI] = None
+
+
+def _get_client() -> AzureOpenAI:
+    """Lazily initialize Azure OpenAI client to avoid import-time crashes."""
+    global _client
+    if _client is not None:
+        return _client
+
+    missing = []
+    if not Config.AZURE_OPENAI_ENDPOINT:
+        missing.append("AZURE_OPENAI_ENDPOINT")
+    if not Config.AZURE_OPENAI_API_KEY:
+        missing.append("AZURE_OPENAI_API_KEY")
+    if not Config.AZURE_OPENAI_API_VERSION:
+        missing.append("AZURE_OPENAI_API_VERSION")
+
+    if missing:
+        raise RuntimeError(
+            "Azure OpenAI is not configured. Missing: " + ", ".join(missing)
+        )
+
+    _client = AzureOpenAI(
+        azure_endpoint=Config.AZURE_OPENAI_ENDPOINT,
+        api_key=Config.AZURE_OPENAI_API_KEY,
+        api_version=Config.AZURE_OPENAI_API_VERSION,
+    )
+    return _client
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +260,7 @@ def generate_sql(user_question: str, temperature: float | None = None) -> str:
         return cached["sql"]
 
     try:
-        response = _client.chat.completions.create(
+        response = _get_client().chat.completions.create(
             model=Config.AZURE_OPENAI_DEPLOYMENT,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
@@ -294,7 +313,7 @@ def cortex_complete(
     Replaces SNOWFLAKE.CORTEX.COMPLETE.
     """
     try:
-        response = _client.chat.completions.create(
+        response = _get_client().chat.completions.create(
             model=model or Config.PRESCRIPTIVE_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=temperature,
@@ -317,10 +336,9 @@ def cortex_complete_json(
 ) -> str:
     """
     General-purpose Azure OpenAI completion.
-    Replaces SNOWFLAKE.CORTEX.COMPLETE.
     """
     try:
-        response = _client.chat.completions.create(
+        response = _get_client().chat.completions.create(
             model=model or Config.PRESCRIPTIVE_MODEL,
             messages=[{"role": "user", "content": prompt}],
             temperature=temperature,

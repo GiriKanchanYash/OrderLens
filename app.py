@@ -11,14 +11,23 @@ from typing import Optional, Dict, List, Any
 from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
 from config import Config
-from llm_service_full import generate_sql, cortex_complete, generate_prescriptive_insights
-from db_service import get_active_session, _get_warehouse_session, run_df, execute_query, execute_non_query, normalize_upper, cache_get, cache_set, run_warehouse_df, run_warehouse_non_query, get_warehouse_connection
+from llm_service_full import generate_sql, cortex_complete
+from db_service import get_active_session, _get_warehouse_session, run_df, run_warehouse_df, run_warehouse_non_query
 import re
 import html
 import uuid
 import sys
 import os
 import hashlib
+from genie_middleware import (
+    set_log_context,
+    log_event,
+    log_events_upsert,
+    get_existing_question_frequency,
+)
+from warehouse_setup import ensure_warehouse_tables
+
+
 sys.path.insert(0, os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "scripts"))
 
@@ -36,22 +45,61 @@ if not logger.handlers:
 
 # from warehouse_setup import ensure_warehouse_tables
 
-
-# ---------- Dependencies Check ----------
-try:
-    import streamlit as st
-    import pandas as pd
-    import altair as alt
-    import numpy as np
-except ImportError as e:
-    st.error(
-        f"Missing dependency: {e}. Please install required packages: streamlit, pandas, altair, numpy")
-    st.stop()
-
-
 # Get DB session
 session = get_active_session()
 session_wh = _get_warehouse_session()
+
+if "startup_db_check_done" not in st.session_state:
+    st.session_state["startup_db_check_done"] = True
+
+    try:
+        # 🔌 DB connection check
+        session.sql("SELECT 1 AS probe").collect()
+
+        # 🏗 Warehouse setup (run once)
+        if "warehouse_setup_done" not in st.session_state:
+            try:
+                _setup_results = ensure_warehouse_tables()
+                st.session_state["warehouse_setup_done"] = True
+
+                _setup_errors = {
+                    k: v for k, v in _setup_results.items()
+                    if "error" in str(v).lower()
+                }
+
+                if _setup_errors:
+                    st.warning(
+                        f"Some warehouse tables could not be created: {_setup_errors}"
+                    )
+
+            except Exception as _setup_err:
+                st.warning(f"Warehouse setup warning (non-blocking): {_setup_err}")
+                st.session_state["warehouse_setup_done"] = True
+
+    except Exception as e:
+        err_str = str(e)
+
+        # ❌ Show DB error only when exception occurs
+        st.error("Database connection failed. Check the diagnostics below.")
+
+        if (
+            "Server is not found" in err_str
+            or "connection to ." in err_str
+            or "08001" in err_str
+        ):
+            st.markdown(
+                """
+                **Possible causes:**
+                - Database server is down
+                - Incorrect host or port
+                - Network/firewall blocking access
+                - Wrong connection string
+
+                Please verify your database configuration.
+                """
+            )
+        else:
+            st.markdown(f"**Error details:** `{err_str}`")
 
 # Database configuration
 FILE = "schema_model.yaml"
@@ -1199,7 +1247,7 @@ def _resolve_user_identity() -> str:
 
     Resolution order:
       1. Streamlit session state  (if already resolved this session)
-      2. Fabric / Snowflake SQL   CURRENT_USER() - works inside Fabric runtime
+      2. Fabric SQL   CURRENT_USER() - works inside Fabric runtime
       3. Azure AD token header    X-MS-CLIENT-PRINCIPAL-NAME injected by Azure
                                   Easy Auth / App Service authentication
       4. APP_USER environment variable  - set in Azure App Service configuration
@@ -1306,7 +1354,7 @@ def _load_user_chat_dates() -> list:
         current_user = _get_current_user_raw() or "UNKNOWN"
         user_esc = _sql_escape(current_user)
 
-        WH_TBL = f"[{Config.WAREHOUSE_SCHEMA}].[{Config.GENIE_CONTEXT_MEMORY_TABLE}]"
+        WH_TBL = Config.GENIE_CONTEXT_MEMORY_TABLE
 
         sql = f"""
             SELECT
@@ -1393,7 +1441,8 @@ def _load_queries_by_date(chat_date: str) -> list:
     """Fetches all queries for a specific date."""
     try:
         current_user = _get_current_user_raw() or "UNKNOWN"
-        WH_TBL = f"[{Config.WAREHOUSE_SCHEMA}].[{Config.GENIE_CONTEXT_MEMORY_TABLE}]"
+        user_esc = _sql_escape(current_user)
+        WH_TBL = Config.GENIE_CONTEXT_MEMORY_TABLE
         
         sql = f"""
            SELECT
@@ -1405,7 +1454,7 @@ def _load_queries_by_date(chat_date: str) -> list:
                 [Action_Details],
                 [ChatDate]
             FROM {WH_TBL}
-            WHERE UPPER(Username) = UPPER('{current_user}') AND [ChatDate] = '{chat_date}' AND [Action_Type] IN ('GENIE_QUERY');
+            WHERE UPPER(Username) = UPPER('{user_esc}') AND [ChatDate] = '{chat_date}' AND [Action_Type] IN ('GENIE_QUERY');
         """
         
         df = run_warehouse_df(sql)
@@ -1427,13 +1476,6 @@ def _load_queries_by_date(chat_date: str) -> list:
     except Exception as e:
         st.warning(f"Could not load chat history for date {chat_date}: {e}")
         return []
-
-    if preset == "QTD":
-        start = date(today.year, ((today.month - 1)//3)*3 + 1, 1)
-        return start, today
-    if preset == "YTD":
-        return date(today.year, 1, 1), today
-    return today.replace(day=1), today  # Current month
 
 def _append_genie_question(query: str, analysis_type: str):
     q = query.strip()
@@ -1724,27 +1766,44 @@ def _extract_cortex_text(raw) -> str:
 
 
 def _cortex_complete_prescriptive(content: list, run_df_func, question: str) -> str:
-    """Use LLM to generate business-driven prescriptive insights from query data."""
+    """Generate prescriptive insights using Azure OpenAI with middleware logging."""
+    
+    start_time = time.time()
+    
     data_parts = []
+    executed_sqls = []
+
     for block in content or []:
         if block.get("type") != "sql":
             continue
+
         sql = block.get("statement", "")
         if not sql.strip():
             continue
+
         try:
             df = run_df_func(sql)
+            executed_sqls.append(sql)
+
             if df is None or df.empty:
                 continue
+
             head = df.head(40)
             data_parts.append(head.to_string(index=False, max_colwidth=40))
-        except Exception:
+
+        except Exception as e:
+            logger.warning(f"Failed to execute SQL block: {e}")
             continue
+    
     if not data_parts:
         return ""
+    
     data_str = "\n\n---\n\n".join(data_parts)
+
+    # Limit payload size
     if len(data_str) > 15000:
-        data_str = data_str[:15000] + "\n... (truncated)"
+        data_str = data_str[:15000] + "\n(truncated)"
+    
     prompt = (
         "You are a sales & operations business analyst. The user asked a question and received the following data from our analytics. "
         "Provide prescriptive insights: specific recommended actions and risks based on the data. "
@@ -1753,30 +1812,46 @@ def _cortex_complete_prescriptive(content: list, run_df_func, question: str) -> 
         f"User question: {question}\n\n"
         f"Data:\n{data_str}"
     )
+    
     try:
-        """
-        result = session.sql(
-            "SELECT SNOWFLAKE.CORTEX.COMPLETE(?, ?) AS RESPONSE",
-            params=[CORTEX_PRESCRIPTIVE_MODEL, prompt]
-        ).to_pandas()
+        result = cortex_complete(prompt, temperature=0.3)
 
-        result = cortex_complete(prompt, temperature=0.3)
-        if not result.empty and "RESPONSE" in result.columns:
-            text = _extract_cortex_text(result.at[0, "RESPONSE"])
-            if text and len(text) > 20:
-                return text
-    except Exception:
-        pass
-    return ""
-    """
-        result = cortex_complete(prompt, temperature=0.3)
+        duration = round(time.time() - start_time, 3)
+
         if result and len(result.strip()) > 20:
-            return result.strip()
+            result_clean = result.strip()
+
+            # 🔥 Middleware Logging (SUCCESS)
+            log_event("AI_INSIGHT", {
+                "summary": result_clean[:200],
+                "full_answer": result_clean,
+                "sql": " | ".join(executed_sqls)[:1000],
+                "relevance": 0.95,
+                "details": f"LLM response time: {duration}s"
+            })
+
+            return result_clean
+
+        # 🔹 Edge case: empty/weak response
+        log_event("AI_EMPTY", {
+            "summary": "LLM returned empty/weak response",
+            "details": f"Time: {duration}s",
+            "relevance": 0.2
+        })
+
     except Exception as e:
-        print(f"Prescriptive insights failed: {e}")
+        duration = round(time.time() - start_time, 3)
 
+        # 🔥 Middleware Logging (ERROR)
+        log_event("AI_ERROR", {
+            "summary": "LLM failed",
+            "details": f"{str(e)} | Time: {duration}s",
+            "relevance": 0.0
+        })
+
+        logger.error(f"Prescriptive insights failed: {e}")
+    
     return ""
-
 
 def _generate_prescriptive_from_data(content: list, run_df_func) -> str:
     """Generate data-driven prescriptive insights from SQL result dataframes when Cortex returns generic text."""
@@ -2657,7 +2732,6 @@ def call_cortex_analyst(query_text: str, conversation_history: list = None) -> d
         _mem_prefix = _mem.get_prefix() if (_mem and _mem.count > 0) else ""
         augmented = _mem_prefix + DECISION_SUPPORT_INSTRUCTION + \
             (query_text or "").strip()
-        messages = []
         if conversation_history:
             _exp = "user"
             _ok = True
@@ -2970,6 +3044,19 @@ def process_genie_query(query: str, analysis_type: str = "custom") -> dict:
         "timestamp": pd.Timestamp.now(), "response": None,
     })
 
+    current_user = _get_current_user_raw() or "UNKNOWN"
+    session_id = st.session_state.get("genie_session_id", "unknown")
+
+    set_log_context(question=query, user=current_user, session_id=session_id)
+
+    event_frequency = None
+    try:
+        question_esc = _sql_escape(query)
+        user_esc = _sql_escape(current_user[:100])
+        event_frequency = get_existing_question_frequency(question_esc, user_esc) + 1
+    except Exception:
+        event_frequency = None
+
     _cache = st.session_state.get("genie_cache")
 
     # Detect contextual follow-ups — bypass cache to avoid stale context
@@ -2988,6 +3075,24 @@ def process_genie_query(query: str, analysis_type: str = "custom") -> dict:
         response = cached_resp
         response["cache_fetch_time_ms"] = (time.time() - _t0) * 1000
     else:
+        if not _is_contextual:
+            try:
+                miss_payload = {
+                    "question": query,
+                    "summary": "Cache miss",
+                    "cache_key": query[:250],
+                    "relevance": 0.2,
+                    "details": json.dumps(
+                        {"analysis_type": analysis_type, "stage": "cache_lookup"},
+                        ensure_ascii=True,
+                    ),
+                }
+                if event_frequency is not None:
+                    miss_payload["frequency"] = event_frequency
+                log_event("CACHE_MISS", miss_payload)
+            except Exception as exc:
+                logger.warning("CACHE_MISS logging failed: %s", exc)
+
         # Build strict user→analyst conversation history
         _conv_history = []
         _prior = [m for m in st.session_state.genie_messages[:-1]
@@ -3069,6 +3174,48 @@ def process_genie_query(query: str, analysis_type: str = "custom") -> dict:
     st.session_state.recent_analyses = st.session_state.recent_analyses[:10]
     _append_genie_question(query, analysis_type)
 
+    # Build a complete middleware payload for Genie memory logging.
+    _resp_content = (
+        response.get("message", {}).get("content", [])
+        if isinstance(response, dict) else []
+    )
+    _sql_statements = [
+        str(b.get("statement", "")).strip()
+        for b in _resp_content
+        if isinstance(b, dict) and b.get("type") == "sql" and b.get("statement")
+    ]
+    _sql_used = " | ".join(_sql_statements)[:2000]
+    _a_full = next(
+        (
+            str(b.get("text", "")).strip()
+            for b in _resp_content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ),
+        assistant_text,
+    )[:4000]
+    result_sql = _sql_used
+    result_full_answer = _a_full or (str(response)[:4000] if isinstance(response, dict) else "")
+    result_summary = ""
+    if result_full_answer:
+        try:
+            result_summary = generate_context_summary(
+                question=query,
+                full_answer=result_full_answer,
+                sql_query=result_sql,
+            )[:20000]
+        except Exception:
+            result_summary = ""
+    if not result_summary and query:
+        result_summary = query[:200]
+    _tables_used = sorted(set(_sql_statements))[:10]
+    _details = {
+        "analysis_type": analysis_type,
+        "from_cache": from_cache,
+        "session_label": st.session_state.get("genie_session_label", ""),
+        "sql_blocks": len(_sql_statements),
+    }
+    _details_json = json.dumps(_details, ensure_ascii=True)
+
     # Persist both turns to Snowflake chat sessions table
     _cp = st.session_state.get("chat_persistence")
     _sid = st.session_state.get("genie_session_id", "")
@@ -3080,24 +3227,29 @@ def process_genie_query(query: str, analysis_type: str = "custom") -> dict:
             _cp.save_turn(_sid, _ti, "user", query, "", "user_input", _lbl)
             _ti += 1
             # Assistant turn — store the FULL Cortex text (not the truncated bubble)
-            _resp_content = (
-                response.get("message", {}).get("content", [])
-                if isinstance(response, dict) else []
-            )
-            _sql_used = " | ".join(
-                b.get("statement", "") for b in _resp_content
-                if b.get("type") == "sql"
-            )[:2000]
-            _a_full = next(
-                (b.get("text", "")
-                 for b in _resp_content if b.get("type") == "text"),
-                assistant_text
-            )[:4000]
             _cp.save_turn(_sid, _ti, "assistant", _a_full,
                           _sql_used, "cortex", _lbl)
             st.session_state["chat_turn_index"] = _ti + 1
-        except Exception:
-            pass  # Never block the UI for persistence errors
+        except Exception as exc:
+            logger.warning("Chat persistence failed: %s", exc)
+
+    try:
+        log_event("GENIE_QUERY", {
+            "question": query,
+            "summary": result_summary,
+            "full_answer": result_full_answer,
+            "sql": result_sql,
+            "tables": ",".join(_tables_used),
+            "filters": "{}",
+            "details": _details_json,
+            "cache_key": query[:250],
+            "relevance": 0.9 if result_sql else 0.5,
+            "frequency": event_frequency,
+        })
+        st.session_state["_last_genie_summary"] = result_summary
+        st.session_state["_last_genie_sql"] = result_sql
+    except Exception as exc:
+        logger.warning("GENIE_QUERY logging failed: %s", exc)
 
     return response
 
@@ -3123,7 +3275,7 @@ def format_change(change_tuple):
 
     if not has_prev and change > 0:
         # No previous data but have current - show as positive
-        return f"↗ New", "positive"
+        return "↗ New", "positive"
 
     # If change rounds to 0% (absolute value < 0.5), show as neutral black
     if abs(change) < 0.5:
@@ -4513,143 +4665,6 @@ elif st.session_state.current_page == "Genie":
         "order_status":        {"title": "Order Status",        "icon_svg": _ORD_SVG, "desc": "See order status distribution, fulfillment, and bottlenecks",    "question": "Show order status distribution by count and revenue"},
     }
 
-    def process_genie_query(query: str, analysis_type: str = "custom"):
-        import time as _time
-
-        st.session_state.genie_messages.append({
-            "role": "user", "content": query,
-            "timestamp": pd.Timestamp.now(), "response": None,
-        })
-
-        _cache = st.session_state.get("genie_cache")
-        _t0 = _time.time()
-
-        _followup_signals = {"them", "those", "their", "it", "same", "above",
-                             "previous", "that", "these", "which one", "how about",
-                             "what about", "and", "also"}
-        _q_words = set(query.lower().split())
-        _is_contextual = bool(
-            _q_words & _followup_signals) and len(query.split()) < 8
-
-        _conv_history = []
-        _prior_user_msgs = [
-            m for m in st.session_state.genie_messages[:-1] if m.get("role") == "user"]
-        _is_followup = len(_prior_user_msgs) > 0
-
-        cached_resp = None
-        if _cache and not _is_contextual:
-            cached_resp = _cache.get(query)
-
-        from_cache = cached_resp is not None and _cache._is_real(cached_resp)
-
-        if from_cache:
-            response = cached_resp
-            response["cache_fetch_time_ms"] = (_time.time() - _t0) * 1000
-        else:
-            if _is_followup:
-                _all_prev = st.session_state.genie_messages[:-1]
-                _pairs, _i = [], 0
-                while _i < len(_all_prev) - 1:
-                    _um, _am = _all_prev[_i], _all_prev[_i + 1]
-                    if _um.get("role") == "user" and _am.get("role") == "assistant":
-                        _u_txt = (_um.get("content") or "").strip()
-                        _prev_resp = _am.get("response")
-                        _a_txt = ""
-                        if isinstance(_prev_resp, dict):
-                            _blocks = _prev_resp.get(
-                                "message", {}).get("content", [])
-                            _a_txt = " ".join(b.get("text", "") for b in _blocks if b.get(
-                                "type") == "text").strip()
-                        if not _a_txt:
-                            _a_txt = (_am.get("content") or "").strip()
-                        if _u_txt and _a_txt:
-                            _pairs.append((_u_txt[:1500], _a_txt[:1500]))
-                        _i += 2
-                    else:
-                        _i += 1
-                for _u_txt, _a_txt in _pairs[-4:]:
-                    _conv_history.append({"role": "user",     "content": [
-                                         {"type": "text", "text": _u_txt}]})
-                    _conv_history.append({"role": "analyst",  "content": [
-                                         {"type": "text", "text": _a_txt}]})
-
-            response = call_cortex_analyst(
-                query, conversation_history=_conv_history if _conv_history else None)
-
-            if _cache and not response.get("error") and not _is_contextual:
-                ok = _cache.set(query, response)
-                if not ok and _cache.last_error:
-                    st.session_state["_cache_write_error"] = _cache.last_error
-                else:
-                    st.session_state.pop("_cache_write_error", None)
-
-        # Bubble text — empty for cache hits (badge shows); short summary for fresh
-        if from_cache:
-            assistant_text = ""
-        else:
-            _blocks = response.get("message", {}).get(
-                "content", []) if isinstance(response, dict) else []
-            _full_text = next((b.get("text", "")
-                              for b in _blocks if b.get("type") == "text"), "")
-            if _full_text:
-                _first = _full_text.split(".")[0].strip()
-                assistant_text = (
-                    _first[:120] + "…") if len(_first) > 120 else _first
-            elif response.get("error"):
-                assistant_text = str(response["error"])
-            elif response.get("layout"):
-                assistant_text = "Analysis complete."
-            else:
-                assistant_text = ""
-
-        st.session_state.genie_messages.append({
-            "role": "assistant", "content": assistant_text[:600],
-            "timestamp": pd.Timestamp.now(), "response": response,
-            "from_cache": from_cache,
-        })
-        st.session_state.genie_messages = st.session_state.genie_messages[-GENIE_SHORT_TERM_MAX_MSGS:]
-
-        if analysis_type == "custom":
-            st.session_state.last_custom_query = query
-        st.session_state.recent_analyses.insert(0, {
-            "query": query, "type": analysis_type,
-            "timestamp": pd.Timestamp.now(), "response": response,
-        })
-        st.session_state.recent_analyses = st.session_state.recent_analyses[:10]
-        _append_genie_question(query, analysis_type)
-
-        _cp = st.session_state.get("chat_persistence")
-        _sid = st.session_state.get("genie_session_id", "")
-        _lbl = st.session_state.get("genie_session_label", "")
-        if _cp and _sid:
-            try:
-                _ti = st.session_state.get("chat_turn_index", 0)
-                _cp.save_turn(_sid, _ti, "user", query, "", "user_input", _lbl)
-                _ti += 1
-                _sql_used, _src, _full_text2 = "", "", assistant_text
-                if isinstance(response, dict):
-                    _sql_used = str(response.get("sql", "") or "")[:2000]
-                    _src = response.get("source", "")
-                    _fp = " ".join(b.get("text", "") for b in response.get(
-                        "message", {}).get("content", []) if b.get("type") == "text").strip()
-                    if _fp:
-                        _full_text2 = _fp
-                _cp.save_turn(_sid, _ti, "assistant",
-                              _full_text2[:3500], _sql_used, _src, _lbl)
-                st.session_state.chat_turn_index = _ti + 1
-            except Exception:
-                pass
-
-        _msg_count = len(st.session_state.get("genie_messages", []))
-        _mem_obj = st.session_state.get("genie_memory")
-        if _mem_obj and _msg_count % 10 == 0:
-            try:
-                _mem_obj.refresh()
-            except Exception:
-                pass
-
-        return response
-
     # Prefill from other pages
     prefill_q = st.session_state.pop("genie_prefill_question", None)
     if prefill_q and isinstance(prefill_q, str) and prefill_q.strip():
@@ -4969,7 +4984,7 @@ elif st.session_state.current_page == "Genie":
 
                 try:
                     with st.spinner("Summarizing conversation..."):
-                        sum_prompt = f"""Summarize this sales & operations analytics conversation in 4-5 bullet points. 
+                        sum_prompt = """Summarize this sales & operations analytics conversation in 4-5 bullet points. 
                                     Keep key findings, dealer names, and important numbers:"""
                         _tdf = cortex_complete(sum_prompt)
 
