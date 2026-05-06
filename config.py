@@ -8,7 +8,6 @@ the codebase never contains hard-coded values.
 import os
 import yaml
 from dotenv import load_dotenv
-from pathlib import Path
 
 load_dotenv()
 
@@ -255,9 +254,12 @@ class Config:
     SAVED_INSIGHTS_TABLE: str = _naming.get(
         "saved_insights_table", "SAVED_INSIGHTS")
     CACHE_TABLE_NAME: str = _naming.get("cache_table", "QUERY_RESULT_CACHE")
+    GENIE_CONTEXT_MEMORY_TABLE: str = _naming.get("genie_context_memory_table", "GENIE_CONTEXT_MEMORY")
 
     GENIE_HISTORY_TABLE = f"{FABRIC_ORDERLENS_WAREHOUSE_DATABASE}.{DEFAULT_SCHEMA}.{HISTORY_TABLE_NAME}"
     SAVED_INSIGHTS_TABLE = f"{FABRIC_ORDERLENS_WAREHOUSE_DATABASE}.{DEFAULT_SCHEMA}.{SAVED_INSIGHTS_TABLE}"
+    GENIE_CONTEXT_MEMORY_TABLE = f"[{FABRIC_ORDERLENS_WAREHOUSE_DATABASE}].[{DEFAULT_SCHEMA}].[{GENIE_CONTEXT_MEMORY_TABLE}]"
+    
 
     # ------------------------------------------------------------------
     # Validation

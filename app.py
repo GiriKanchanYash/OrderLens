@@ -11,14 +11,23 @@ from typing import Optional, Dict, List, Any
 from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
 from config import Config
-from llm_service_full import generate_sql, cortex_complete, generate_prescriptive_insights
-from db_service import get_active_session, _get_warehouse_session, run_df, execute_query, execute_non_query, normalize_upper, cache_get, cache_set, run_warehouse_df, run_warehouse_non_query, get_warehouse_connection
+from llm_service_full import generate_sql, cortex_complete
+from db_service import get_active_session, _get_warehouse_session, run_df, run_warehouse_df, run_warehouse_non_query
 import re
 import html
 import uuid
 import sys
 import os
 import hashlib
+from genie_middleware import (
+    set_log_context,
+    log_event,
+    log_events_upsert,
+    get_existing_question_frequency,
+)
+from warehouse_setup import ensure_warehouse_tables
+
+
 sys.path.insert(0, os.path.join(os.path.dirname(
     os.path.abspath(__file__)), "scripts"))
 
@@ -42,7 +51,6 @@ try:
     import streamlit as st
     import pandas as pd
     import altair as alt
-    import numpy as np
 except ImportError as e:
     st.error(
         f"Missing dependency: {e}. Please install required packages: streamlit, pandas, altair, numpy")
@@ -52,6 +60,58 @@ except ImportError as e:
 # Get DB session
 session = get_active_session()
 session_wh = _get_warehouse_session()
+
+if "startup_db_check_done" not in st.session_state:
+    st.session_state["startup_db_check_done"] = True
+
+    try:
+        # 🔌 DB connection check
+        session.sql("SELECT 1 AS probe").collect()
+
+        # 🏗 Warehouse setup (run once)
+        if "warehouse_setup_done" not in st.session_state:
+            try:
+                _setup_results = ensure_warehouse_tables()
+                st.session_state["warehouse_setup_done"] = True
+
+                _setup_errors = {
+                    k: v for k, v in _setup_results.items()
+                    if "error" in str(v).lower()
+                }
+
+                if _setup_errors:
+                    st.warning(
+                        f"Some warehouse tables could not be created: {_setup_errors}"
+                    )
+
+            except Exception as _setup_err:
+                st.warning(f"Warehouse setup warning (non-blocking): {_setup_err}")
+                st.session_state["warehouse_setup_done"] = True
+
+    except Exception as e:
+        err_str = str(e)
+
+        # ❌ Show DB error only when exception occurs
+        st.error("Database connection failed. Check the diagnostics below.")
+
+        if (
+            "Server is not found" in err_str
+            or "connection to ." in err_str
+            or "08001" in err_str
+        ):
+            st.markdown(
+                """
+                **Possible causes:**
+                - Database server is down
+                - Incorrect host or port
+                - Network/firewall blocking access
+                - Wrong connection string
+
+                Please verify your database configuration.
+                """
+            )
+        else:
+            st.markdown(f"**Error details:** `{err_str}`")
 
 # Database configuration
 FILE = "schema_model.yaml"
@@ -84,7 +144,7 @@ UI_INFO_BG = "#e0f2fe"
 UI_INFO_BORDER = "#bae6fd"
 
 # ── NEUTRAL COLOURS ───────────────────────────────────────────────────────────
-UI_BG = "#F8FAFC"      # App background
+UI_BG = "#FFFFFF"      # App background
 UI_PANEL = "#FFFFFF"      # Card / container surface
 UI_TEXT = "#0F172A"      # Primary text
 UI_TEXT_SUBTLE = "#475569"      # Secondary text
@@ -117,18 +177,18 @@ UI_SHADOW_2 = "0 2px 10px rgba(2,8,23,.06)"
 UI_SHADOW_CARD = "0 2px 8px rgba(0,0,0,.04), 0 1px 2px rgba(0,0,0,.06)"
 UI_FONT_FAMILY = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto"
 UI_KPI_LABEL_SIZE = "0.70rem"
-UI_KPI_VALUE_SIZE = "1.75rem"
-UI_TAB_FONT_SIZE = "0.9rem"
+UI_KPI_VALUE_SIZE = "2.2rem"
+UI_TAB_FONT_SIZE = "1rem"
 UI_TAB_FONT_WEIGHT = "600"
 UI_CHAT_FONT_SIZE = "14px"
 UI_CHAT_BUBBLE_MAX = "76%"
-UI_LOGO_HEIGHT = "120px"
+UI_LOGO_HEIGHT = "86px"
 
 # ── CHAT WINDOW ───────────────────────────────────────────────────────────────
 UI_CHAT_SCROLL_HEIGHT = 520          # px — increase for a taller chat window
 
 # ── THEME BG PICKER ───────────────────────────────────────────────────────────
-UI_THEME_DEFAULT_BG = "#FBF9F4"
+UI_THEME_DEFAULT_BG = "#FFFFFF"
 UI_THEME_BTN_COLOR = "#1E40AF"
 UI_THEME_BTN_SIZE = "44px"
 UI_THEME_BOTTOM = "18px"
@@ -174,7 +234,7 @@ def _build_all_css() -> str:
 * {{ font-family: {UI_FONT_FAMILY}; }}
 html,body,[class^="css"]{{ background:var(--bg); color:var(--text); }}
 .main {{ padding:0; background:var(--bg); }}
-.block-container {{ padding-top:1.5rem!important; padding-left:2rem!important; padding-right:2rem!important; max-width:{UI_MAX_WIDTH}; margin:0 auto; }}
+.block-container {{ padding-top:0.8rem!important; padding-left:1.2rem!important; padding-right:1.2rem!important; max-width:{UI_MAX_WIDTH}; margin:0 auto; }}
 .stApp>header+div {{ padding-top:0!important; }}
 .stMainBlockContainer {{ padding-top:1rem!important; }}
 #MainMenu {{ visibility:hidden; }}
@@ -186,34 +246,66 @@ section[data-testid="stSidebar"] {{ display:none; }}
 [data-testid="column"]:has(>div>div>div[style*="yash-header-logo"]) {{ display:flex!important; align-items:center!important; }}
 .stHorizontalBlock:first-of-type {{ align-items:center!important; }}
 .kpi-row {{ display:grid; grid-template-columns:repeat(6,1fr); gap:16px; margin-bottom:30px; }}
-.kpi-card {{ border-radius:16px; padding:20px; position:relative; }}
+.kpi-card {{ border-radius:14px; padding:16px 18px; position:relative; min-height:132px; box-shadow:0 1px 2px rgba(15,23,42,.06); border:1px solid rgba(148,163,184,.18); }}
 .kpi-card-green  {{ background:linear-gradient(135deg,{UI_KPI_GREEN[0]}  0%,{UI_KPI_GREEN[1]}  100%); }}
 .kpi-card-purple {{ background:linear-gradient(135deg,{UI_KPI_PURPLE[0]} 0%,{UI_KPI_PURPLE[1]} 100%); }}
 .kpi-card-cyan   {{ background:linear-gradient(135deg,{UI_KPI_CYAN[0]}   0%,{UI_KPI_CYAN[1]}   100%); }}
 .kpi-card-blue   {{ background:linear-gradient(135deg,{UI_KPI_BLUE[0]}   0%,{UI_KPI_BLUE[1]}   100%); }}
 .kpi-card-yellow {{ background:linear-gradient(135deg,{UI_KPI_YELLOW[0]} 0%,{UI_KPI_YELLOW[1]} 100%); }}
 .kpi-card-lime   {{ background:linear-gradient(135deg,{UI_KPI_LIME[0]}   0%,{UI_KPI_LIME[1]}   100%); }}
-.kpi-label {{ font-size:{UI_KPI_LABEL_SIZE}; font-weight:600; color:#374151; text-transform:uppercase; letter-spacing:.5px; margin-bottom:8px; }}
-.kpi-value {{ font-size:{UI_KPI_VALUE_SIZE}; font-weight:800; color:#1F2937; margin-bottom:8px; }}
-.kpi-change {{ font-size:0.8rem; display:flex; align-items:center; gap:4px; }}
-.kpi-change.positive {{ color:{UI_SUCCESS}; }}
-.kpi-change.negative {{ color:{UI_DANGER}; }}
-.kpi-change.neutral  {{ color:{UI_TEXT}; }}
+.kpi-label {{ font-size:0.75rem; font-weight:700; color:#4B5563; text-transform:uppercase; letter-spacing:.4px; margin-bottom:10px; }}
+.kpi-value {{ font-size:{UI_KPI_VALUE_SIZE}; font-weight:800; color:#111827; margin-bottom:8px; line-height:1.05; }}
+.kpi-change {{ font-size:0.95rem; display:flex; align-items:center; gap:4px; font-weight:600; }}
+.kpi-change.positive {{ color:#DC2626; }}
+.kpi-change.negative {{ color:#DC2626; }}
+.kpi-change.neutral  {{ color:#475569; }}
+.welcome-title {{ font-size:2rem; font-weight:700; color:#1F2937; margin:4px 0 10px 0; }}
 .nav-tab {{ padding:10px 20px; border-radius:8px; font-weight:{UI_TAB_FONT_WEIGHT}; font-size:{UI_TAB_FONT_SIZE}; cursor:pointer; transition:all .2s; color:#4B5563; background:transparent; border:none; }}
 .nav-tab:hover {{ background:#F3F4F6; }}
 .nav-tab.active {{ background:{UI_BRAND}; color:white; }}
-.dashboard-tabs {{ background:transparent; padding:8px 0; display:flex; gap:4px; width:100%; }}
+.dashboard-tabs {{ background:transparent; padding:8px 0; display:flex; gap:10px; width:100%; }}
 .dashboard-tabs .stButton {{ flex:1; }}
-.dashboard-tabs .stButton>button {{ background:transparent; color:{UI_BRAND}; border:none; border-radius:6px; padding:12px 18px; font-size:{UI_TAB_FONT_SIZE}; font-weight:{UI_TAB_FONT_WEIGHT}; width:100%; transition:all .2s; }}
-.dashboard-tabs .stButton>button:hover {{ background:rgba(37,99,235,.1); }}
-.dashboard-tabs .stButton>button[kind="primary"] {{ background:{UI_BRAND}; color:white; border:none; }}
+.dashboard-tabs .stButton>button {{ background:#FFFFFF; color:#4B5563; border:1px solid #D1D5DB; border-radius:10px; padding:12px 18px; font-size:{UI_TAB_FONT_SIZE}; font-weight:{UI_TAB_FONT_WEIGHT}; width:100%; transition:all .2s; }}
+.dashboard-tabs .stButton>button:hover {{ background:#F8FAFC; }}
+.dashboard-tabs .stButton>button[kind="primary"] {{ background:{UI_BRAND}; color:white; border:1px solid {UI_BRAND}; }}
 div[data-testid="stVerticalBlockBorderWrapper"] {{ background:var(--panel); border-radius:{UI_RADIUS_SM}; padding:20px 24px 16px 24px; box-shadow:var(--shadow-card); border:1px solid #F3F4F6; margin-bottom:16px; height:100%; }}
 .chart-title {{ font-size:1.1rem; font-weight:700; color:#111827; margin-bottom:16px; padding-bottom:12px; border-bottom:1px solid #F3F4F6; }}
 [data-testid="stTabs"] {{ width:100%; }}
 [data-testid="stTabs"]>div>div {{ background:#e0efff; padding:8px; border-radius:8px; box-shadow:0 2px 4px rgba(0,0,0,.1); }}
 [data-testid="stTabs"] button[aria-selected="true"]  {{ background:{UI_BRAND}!important; color:white!important; border-radius:6px; font-weight:600; }}
 [data-testid="stTabs"] button[aria-selected="false"] {{ background:transparent!important; color:{UI_BRAND}!important; border-radius:6px; font-weight:600; }}
-.stButton>button {{ border-radius:8px; font-weight:600; transition:all .2s; }}
+.stButton>button {{ border-radius:10px; font-weight:600; transition:all .2s; min-height:42px; }}
+div[data-testid="column"]:has(button[data-testid*="baseButton-nav_"]) button {{
+  border:1px solid #D1D5DB !important;
+  background:#FFFFFF !important;
+  color:#374151 !important;
+  font-weight:600 !important;
+  border-radius:10px !important;
+  min-height:42px !important;
+}}
+div[data-testid="column"]:has(button[data-testid*="baseButton-nav_"]) button[kind="primary"] {{
+  background:{UI_BRAND} !important;
+  color:#FFFFFF !important;
+  border-color:{UI_BRAND} !important;
+}}
+div[data-testid="column"]:has(button[data-testid*="baseButton-t"]) button {{
+  border:1px solid #D1D5DB !important;
+  background:#FFFFFF !important;
+  color:#374151 !important;
+  border-radius:10px !important;
+  min-height:42px !important;
+}}
+div[data-testid="column"]:has(button[data-testid*="baseButton-t"]) button[kind="primary"] {{
+  background:{UI_BRAND} !important;
+  color:#FFFFFF !important;
+  border-color:{UI_BRAND} !important;
+}}
+div[data-testid="stDateInput"] input, div[data-testid="stSelectbox"] div[data-baseweb="select"] {{
+  border-radius:10px !important;
+  border:1px solid #D1D5DB !important;
+  background:#FFFFFF !important;
+  min-height:42px !important;
+}}
 .theme-anchor {{ position:fixed; bottom:{UI_THEME_BOTTOM}; right:{UI_THEME_RIGHT}; z-index:1000000; display:flex; align-items:center; justify-content:center; width:{UI_THEME_BTN_SIZE}; height:{UI_THEME_BTN_SIZE}; border-radius:50%; background-color:{UI_THEME_BTN_COLOR}; border:none; box-shadow:0 4px 12px rgba(15,23,42,.2); font-size:11px; font-weight:700; color:#fff; cursor:pointer; letter-spacing:.5px; }}
 .theme-anchor:hover {{ transform:scale(1.1); box-shadow:0 6px 16px rgba(15,23,42,.3); }}
 .theme-anchor .theme-label-text {{ pointer-events:none; }}
@@ -333,7 +425,7 @@ def load_clean_ui_light():
     <style>
     :root{
       /* Light theme tokens */
-      --bg: #f7f8fb;
+      --bg: #ffffff;
       --panel: #ffffff;
       --panel-2: #fafafa;
       --text: #0f172a;
@@ -364,16 +456,16 @@ def load_clean_ui_light():
       color: var(--text);
       font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto;
     }
-        /* Center the main block and keep consistent width to match design mock */
-        .block-container{ padding-top: 8px; max-width:1180px; margin-left:auto; margin-right:auto; }
-        /* Responsive expansion for very wide screens */
-        @media (min-width: 1400px) {
-            .block-container{ max-width:1320px; }
-            .p2p-header{ max-width:1320px; }
-        }
-        @media (min-width: 1600px) {
-            .block-container{ max-width:1480px; }
-            .p2p-header{ max-width:1480px; }
+    .stApp{
+      background: var(--bg) !important;
+    }
+        /* Keep app content centered at 80% of viewport width */
+        .block-container{
+          padding-top: 8px;
+          width: 80vw;
+          max-width: 80vw;
+          margin-left: auto;
+          margin-right: auto;
         }
 
     /* Branding bar (sticky) */
@@ -436,6 +528,22 @@ def load_clean_ui_light():
 
     /* Controls row */
     .ctrl-label{ color: var(--text-subtle); font-size: 12px; font-weight: 700; margin-bottom: 4px; }
+    /* Multiselect selected chips: use blue instead of default red */
+    div[data-testid="stMultiSelect"] [data-baseweb="tag"]{
+      background: #1e40af !important;
+      border: 1px solid #1e3a8a !important;
+      color: #ffffff !important;
+    }
+    div[data-testid="stMultiSelect"] [data-baseweb="tag"] span{
+      color: #ffffff !important;
+    }
+    div[data-testid="stMultiSelect"] [data-baseweb="tag"] svg{
+      fill: #ffffff !important;
+      color: #ffffff !important;
+    }
+    div[data-testid="stMultiSelect"] [data-baseweb="tag"] [role="button"]{
+      color: #ffffff !important;
+    }
 
     /* Tabs */
     .stTabs [data-baseweb="tab-list"]{
@@ -474,22 +582,49 @@ def load_clean_ui_light():
     .badge.med{  background:#fff4e5; color:#b54708; border-color:#f7cf97; }
     .badge.low{  background:#ecfdf3; color:#067647; border-color:#a6f0c6; }
 
-    /* KPI tiles */
-    .kpi{
-      background: #fff;
-      border: 1px solid #e6e8ee;
-      border-radius: var(--radius-sm);
-      padding: 14px 14px 10px 14px;
-      box-shadow: var(--shadow-2);
-      width: 100%;
-      min-height: 110px;
+    /* KPI tiles (native Streamlit metrics) */
+    [data-testid="stMetric"]{
+      border-radius: 14px;
+      padding: 12px 14px;
+      border: 1px solid rgba(148,163,184,.20);
+      box-shadow: 0 1px 2px rgba(15,23,42,.06);
+      min-height: 126px;
+      background: #ffffff;
     }
-    .kpi .title{ font-size: var(--kpi-title); color: var(--muted); letter-spacing: .3px; font-weight: 800; }
-    .kpi .value{ font-size: var(--kpi-value); font-weight: 900; margin-top: 6px; display:flex; align-items:baseline; gap:8px; }
-    .kpi .delta{ margin-top: 4px; font-weight: 900; display:flex; align-items:center; gap:6px; letter-spacing:.2px; }
-    .kpi .delta .delta-icon { display:inline-flex; width:16px; height:16px; }
-    .kpi .delta.up{ color: var(--success); }  /* green */
-    .kpi .delta.down{ color: var(--danger); } /* red */
+    [data-testid="stMetricLabel"] p{
+      font-size: 0.74rem !important;
+      letter-spacing: .35px !important;
+      color: #4B5563 !important;
+      font-weight: 700 !important;
+    }
+    [data-testid="stMetricValue"] > div{
+      font-size: 2.1rem !important;
+      font-weight: 800 !important;
+      color: #111827 !important;
+      line-height: 1.05 !important;
+    }
+    [data-testid="stMetricDelta"] > div{
+      font-size: 0.9rem !important;
+      font-weight: 600 !important;
+    }
+    .st-key-kpi1 [data-testid="stMetric"]{
+      background: linear-gradient(135deg,#D1FAE5 0%,#A7F3D0 100%);
+    }
+    .st-key-kpi2 [data-testid="stMetric"]{
+      background: linear-gradient(135deg,#EDE9FE 0%,#DDD6FE 100%);
+    }
+    .st-key-kpi3 [data-testid="stMetric"]{
+      background: linear-gradient(135deg,#CFFAFE 0%,#A5F3FC 100%);
+    }
+    .st-key-kpi4 [data-testid="stMetric"]{
+      background: linear-gradient(135deg,#DBEAFE 0%,#BFDBFE 100%);
+    }
+    .st-key-kpi5 [data-testid="stMetric"]{
+      background: linear-gradient(135deg,#FEF3C7 0%,#FDE68A 100%);
+    }
+    .st-key-kpi6 [data-testid="stMetric"]{
+      background: linear-gradient(135deg,#ECFCCB 0%,#D9F99D 100%);
+    }
 
     /* Empty state */
     .empty{
@@ -571,7 +706,7 @@ def load_clean_ui_light():
     .stColumns { gap: 12px !important; }
     .stContainer { padding: 10px 0 !important; }
     .kpi{ min-height:98px; padding:12px; }
-    .p2p-header{ max-width:1180px; margin-left:auto; margin-right:auto; }
+    .p2p-header{ width:80vw; max-width:80vw; margin-left:auto; margin-right:auto; }
 
     /* ========== GENIE PAGE STYLES ========== */
 
@@ -1091,7 +1226,7 @@ def apply_custom_theme_picker(default_color: str = "#FBF9F4", link_text: str = "
 
 # Initialize the background‑color picker once at the top level
 apply_custom_theme_picker(link_text="BG")
-st.markdown(load_clean_ui_light(), unsafe_allow_html=True)
+load_clean_ui_light()
 
 
 # Helper function to run queries
@@ -1124,7 +1259,7 @@ def _resolve_user_identity() -> str:
 
     Resolution order:
       1. Streamlit session state  (if already resolved this session)
-      2. Fabric / Snowflake SQL   CURRENT_USER() - works inside Fabric runtime
+      2. Fabric SQL   CURRENT_USER() - works inside Fabric runtime
       3. Azure AD token header    X-MS-CLIENT-PRINCIPAL-NAME injected by Azure
                                   Easy Auth / App Service authentication
       4. APP_USER environment variable  - set in Azure App Service configuration
@@ -1224,6 +1359,135 @@ def _get_app_owner_role() -> str:
     """Not used in Fabric/Azure deployment"""
     return "UNKNOWN"
 
+def _load_user_chat_dates() -> list:
+    """Fetches chat dates and GENIE query counts for the last 7 days."""
+
+    try:
+        current_user = _get_current_user_raw() or "UNKNOWN"
+        user_esc = _sql_escape(current_user)
+
+        WH_TBL = Config.GENIE_CONTEXT_MEMORY_TABLE
+
+        sql = f"""
+            SELECT
+                [ChatDate],
+                COUNT(*) AS QueryCount,
+                MAX([CreatedAt]) AS LastMessageAt
+            FROM {WH_TBL}
+            WHERE
+                UPPER([Username]) = UPPER('{user_esc}')
+                AND [Action_Type] = 'GENIE_QUERY'
+                AND [ChatDate] >= DATEADD(DAY, -7, CAST(GETDATE() AS DATE))
+            GROUP BY
+                [ChatDate]
+            ORDER BY
+                [ChatDate] DESC;
+        """
+
+        df = run_warehouse_df(sql)
+
+        if df is None or df.empty:
+            return []
+
+        return [
+            {
+                "ChatDate": str(row["ChatDate"]),
+                "count": int(row["QueryCount"]),
+                "last_message_at": str(row["LastMessageAt"])
+            }
+            for _, row in df.iterrows()
+        ]
+
+    except Exception as e:
+        st.warning(f"Could not load query history: {e}")
+        return []
+
+def generate_context_summary(
+    question: str,
+    full_answer: str,
+    sql_query: str
+) -> str:
+    """
+    Uses AI to generate a concise 2–3 line context summary
+    based on the user's question, executed SQL, and full analytical answer.
+    Intended for chat history, memory, or context recall.
+    """
+
+    try:
+        prompt = f"""
+
+            You are generating a short-term analytical memory.
+
+            Create a 2–3 sentence CONTEXT SUMMARY.
+
+            INPUT:
+            Question:
+            {question}
+
+            Answer:
+            {full_answer}
+
+            SQL Query:
+            {sql_query}
+
+            RULES:
+            - Ignore recommendations and prescriptive guidance
+            - Capture:
+            1) Analytical intent
+            2) Data analyzed
+            3) Key conclusion
+            - No bullet points, no numbers unless critical
+            - Neutral, factual language
+            - Max 3 sentences
+            - Output only the summary text
+        """
+
+        summary = cortex_complete(prompt, temperature=0.2)
+
+        return (summary or "").strip()
+
+    except Exception as e:
+        return f"Summary generation failed: {str(e)}"
+
+def _load_queries_by_date(chat_date: str) -> list:
+    """Fetches all queries for a specific date."""
+    try:
+        current_user = _get_current_user_raw() or "UNKNOWN"
+        user_esc = _sql_escape(current_user)
+        WH_TBL = Config.GENIE_CONTEXT_MEMORY_TABLE
+        
+        sql = f"""
+           SELECT
+                [Question],
+                [AnswerSummary],
+                [FullAnswer],
+                [Sql_Query],
+                [Action_Type],
+                [Action_Details],
+                [ChatDate]
+            FROM {WH_TBL}
+            WHERE UPPER(Username) = UPPER('{user_esc}') AND [ChatDate] = '{chat_date}' AND [Action_Type] IN ('GENIE_QUERY');
+        """
+        
+        df = run_warehouse_df(sql)
+        
+        if df is None or df.empty:
+            return []
+        
+        return [
+            {
+                "question": (str(row.get("Question") or "")).strip(),
+                "summary": (str(row.get("AnswerSummary") or "")).strip(),
+                "full_answer": (str(row.get("FullAnswer") or "")).strip(),
+                "sql": (str(row.get("Sql_Query") or "")).strip(),
+                "action_type": (str(row.get("Action_Type") or "")).strip(),
+                "action_details": (str(row.get("Action_Details") or "")).strip()
+            }
+            for _, row in df.iterrows()
+        ]
+    except Exception as e:
+        st.warning(f"Could not load chat history for date {chat_date}: {e}")
+        return []
 
 def _append_genie_question(query: str, analysis_type: str):
     q = query.strip()
@@ -1514,27 +1778,44 @@ def _extract_cortex_text(raw) -> str:
 
 
 def _cortex_complete_prescriptive(content: list, run_df_func, question: str) -> str:
-    """Use LLM to generate business-driven prescriptive insights from query data."""
+    """Generate prescriptive insights using Azure OpenAI with middleware logging."""
+    
+    start_time = time.time()
+    
     data_parts = []
+    executed_sqls = []
+
     for block in content or []:
         if block.get("type") != "sql":
             continue
+
         sql = block.get("statement", "")
         if not sql.strip():
             continue
+
         try:
             df = run_df_func(sql)
+            executed_sqls.append(sql)
+
             if df is None or df.empty:
                 continue
+
             head = df.head(40)
             data_parts.append(head.to_string(index=False, max_colwidth=40))
-        except Exception:
+
+        except Exception as e:
+            logger.warning(f"Failed to execute SQL block: {e}")
             continue
+    
     if not data_parts:
         return ""
+    
     data_str = "\n\n---\n\n".join(data_parts)
+
+    # Limit payload size
     if len(data_str) > 15000:
-        data_str = data_str[:15000] + "\n... (truncated)"
+        data_str = data_str[:15000] + "\n(truncated)"
+    
     prompt = (
         "You are a sales & operations business analyst. The user asked a question and received the following data from our analytics. "
         "Provide prescriptive insights: specific recommended actions and risks based on the data. "
@@ -1543,30 +1824,46 @@ def _cortex_complete_prescriptive(content: list, run_df_func, question: str) -> 
         f"User question: {question}\n\n"
         f"Data:\n{data_str}"
     )
+    
     try:
-        """
-        result = session.sql(
-            "SELECT SNOWFLAKE.CORTEX.COMPLETE(?, ?) AS RESPONSE",
-            params=[CORTEX_PRESCRIPTIVE_MODEL, prompt]
-        ).to_pandas()
+        result = cortex_complete(prompt, temperature=0.3)
 
-        result = cortex_complete(prompt, temperature=0.3)
-        if not result.empty and "RESPONSE" in result.columns:
-            text = _extract_cortex_text(result.at[0, "RESPONSE"])
-            if text and len(text) > 20:
-                return text
-    except Exception:
-        pass
-    return ""
-    """
-        result = cortex_complete(prompt, temperature=0.3)
+        duration = round(time.time() - start_time, 3)
+
         if result and len(result.strip()) > 20:
-            return result.strip()
+            result_clean = result.strip()
+
+            # 🔥 Middleware Logging (SUCCESS)
+            log_event("AI_INSIGHT", {
+                "summary": result_clean[:200],
+                "full_answer": result_clean,
+                "sql": " | ".join(executed_sqls)[:1000],
+                "relevance": 0.95,
+                "details": f"LLM response time: {duration}s"
+            })
+
+            return result_clean
+
+        # 🔹 Edge case: empty/weak response
+        log_event("AI_EMPTY", {
+            "summary": "LLM returned empty/weak response",
+            "details": f"Time: {duration}s",
+            "relevance": 0.2
+        })
+
     except Exception as e:
-        print(f"Prescriptive insights failed: {e}")
+        duration = round(time.time() - start_time, 3)
 
+        # 🔥 Middleware Logging (ERROR)
+        log_event("AI_ERROR", {
+            "summary": "LLM failed",
+            "details": f"{str(e)} | Time: {duration}s",
+            "relevance": 0.0
+        })
+
+        logger.error(f"Prescriptive insights failed: {e}")
+    
     return ""
-
 
 def _generate_prescriptive_from_data(content: list, run_df_func) -> str:
     """Generate data-driven prescriptive insights from SQL result dataframes when Cortex returns generic text."""
@@ -2447,7 +2744,6 @@ def call_cortex_analyst(query_text: str, conversation_history: list = None) -> d
         _mem_prefix = _mem.get_prefix() if (_mem and _mem.count > 0) else ""
         augmented = _mem_prefix + DECISION_SUPPORT_INSTRUCTION + \
             (query_text or "").strip()
-        messages = []
         if conversation_history:
             _exp = "user"
             _ok = True
@@ -2760,6 +3056,19 @@ def process_genie_query(query: str, analysis_type: str = "custom") -> dict:
         "timestamp": pd.Timestamp.now(), "response": None,
     })
 
+    current_user = _get_current_user_raw() or "UNKNOWN"
+    session_id = st.session_state.get("genie_session_id", "unknown")
+
+    set_log_context(question=query, user=current_user, session_id=session_id)
+
+    event_frequency = None
+    try:
+        question_esc = _sql_escape(query)
+        user_esc = _sql_escape(current_user[:100])
+        event_frequency = get_existing_question_frequency(question_esc, user_esc) + 1
+    except Exception:
+        event_frequency = None
+
     _cache = st.session_state.get("genie_cache")
 
     # Detect contextual follow-ups — bypass cache to avoid stale context
@@ -2778,6 +3087,24 @@ def process_genie_query(query: str, analysis_type: str = "custom") -> dict:
         response = cached_resp
         response["cache_fetch_time_ms"] = (time.time() - _t0) * 1000
     else:
+        if not _is_contextual:
+            try:
+                miss_payload = {
+                    "question": query,
+                    "summary": "Cache miss",
+                    "cache_key": query[:250],
+                    "relevance": 0.2,
+                    "details": json.dumps(
+                        {"analysis_type": analysis_type, "stage": "cache_lookup"},
+                        ensure_ascii=True,
+                    ),
+                }
+                if event_frequency is not None:
+                    miss_payload["frequency"] = event_frequency
+                log_event("CACHE_MISS", miss_payload)
+            except Exception as exc:
+                logger.warning("CACHE_MISS logging failed: %s", exc)
+
         # Build strict user→analyst conversation history
         _conv_history = []
         _prior = [m for m in st.session_state.genie_messages[:-1]
@@ -2859,6 +3186,48 @@ def process_genie_query(query: str, analysis_type: str = "custom") -> dict:
     st.session_state.recent_analyses = st.session_state.recent_analyses[:10]
     _append_genie_question(query, analysis_type)
 
+    # Build a complete middleware payload for Genie memory logging.
+    _resp_content = (
+        response.get("message", {}).get("content", [])
+        if isinstance(response, dict) else []
+    )
+    _sql_statements = [
+        str(b.get("statement", "")).strip()
+        for b in _resp_content
+        if isinstance(b, dict) and b.get("type") == "sql" and b.get("statement")
+    ]
+    _sql_used = " | ".join(_sql_statements)[:2000]
+    _a_full = next(
+        (
+            str(b.get("text", "")).strip()
+            for b in _resp_content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ),
+        assistant_text,
+    )[:4000]
+    result_sql = _sql_used
+    result_full_answer = _a_full or (str(response)[:4000] if isinstance(response, dict) else "")
+    result_summary = ""
+    if result_full_answer:
+        try:
+            result_summary = generate_context_summary(
+                question=query,
+                full_answer=result_full_answer,
+                sql_query=result_sql,
+            )[:20000]
+        except Exception:
+            result_summary = ""
+    if not result_summary and query:
+        result_summary = query[:200]
+    _tables_used = sorted(set(_sql_statements))[:10]
+    _details = {
+        "analysis_type": analysis_type,
+        "from_cache": from_cache,
+        "session_label": st.session_state.get("genie_session_label", ""),
+        "sql_blocks": len(_sql_statements),
+    }
+    _details_json = json.dumps(_details, ensure_ascii=True)
+
     # Persist both turns to Snowflake chat sessions table
     _cp = st.session_state.get("chat_persistence")
     _sid = st.session_state.get("genie_session_id", "")
@@ -2870,24 +3239,29 @@ def process_genie_query(query: str, analysis_type: str = "custom") -> dict:
             _cp.save_turn(_sid, _ti, "user", query, "", "user_input", _lbl)
             _ti += 1
             # Assistant turn — store the FULL Cortex text (not the truncated bubble)
-            _resp_content = (
-                response.get("message", {}).get("content", [])
-                if isinstance(response, dict) else []
-            )
-            _sql_used = " | ".join(
-                b.get("statement", "") for b in _resp_content
-                if b.get("type") == "sql"
-            )[:2000]
-            _a_full = next(
-                (b.get("text", "")
-                 for b in _resp_content if b.get("type") == "text"),
-                assistant_text
-            )[:4000]
             _cp.save_turn(_sid, _ti, "assistant", _a_full,
                           _sql_used, "cortex", _lbl)
             st.session_state["chat_turn_index"] = _ti + 1
-        except Exception:
-            pass  # Never block the UI for persistence errors
+        except Exception as exc:
+            logger.warning("Chat persistence failed: %s", exc)
+
+    try:
+        log_event("GENIE_QUERY", {
+            "question": query,
+            "summary": result_summary,
+            "full_answer": result_full_answer,
+            "sql": result_sql,
+            "tables": ",".join(_tables_used),
+            "filters": "{}",
+            "details": _details_json,
+            "cache_key": query[:250],
+            "relevance": 0.9 if result_sql else 0.5,
+            "frequency": event_frequency,
+        })
+        st.session_state["_last_genie_summary"] = result_summary
+        st.session_state["_last_genie_sql"] = result_sql
+    except Exception as exc:
+        logger.warning("GENIE_QUERY logging failed: %s", exc)
 
     return response
 
@@ -2913,7 +3287,7 @@ def format_change(change_tuple):
 
     if not has_prev and change > 0:
         # No previous data but have current - show as positive
-        return f"↗ New", "positive"
+        return "↗ New", "positive"
 
     # If change rounds to 0% (absolute value < 0.5), show as neutral black
     if abs(change) < 0.5:
@@ -2945,7 +3319,7 @@ with header_cols[0]:
 
 # Center: Navigation (Dashboard, Genie, Order Life Cycle, Forecast)
 with header_cols[1]:
-    nav_cols = st.columns([1, 1, 1.2, 1])
+    nav_cols = st.columns([1, 1, 1.2, 1, 1])
 
     with nav_cols[0]:
         if st.button("Dashboard", key="nav_dash",
@@ -2975,6 +3349,13 @@ with header_cols[1]:
             st.session_state.current_page = "Forecast"
             st.rerun()
 
+    with nav_cols[4]:
+        if st.button("AI Agents", key="nav_ai",
+                     type="primary" if st.session_state.current_page == "AI Agents" else "secondary",
+                     use_container_width=True):
+            st.session_state.current_page = "AI Agents"
+            st.rerun()
+
 # Right: YASH Technologies logo (embedded in this file — no external file or URL)
 with header_cols[2]:
     st.markdown(f"""
@@ -2999,9 +3380,9 @@ if st.session_state.current_page == "Dashboard":
     MIN_DATE = date(2024, 1, 1)
 
     if "time_filter" not in st.session_state:
-        st.session_state.time_filter = "Last 30 Days"
+        st.session_state.time_filter = "YTD"
     if "start_date" not in st.session_state:
-        st.session_state.start_date = TODAY - timedelta(days=30)
+        st.session_state.start_date = date(TODAY.year, 1, 1)
     if "end_date" not in st.session_state:
         st.session_state.end_date = TODAY
 
@@ -3258,58 +3639,34 @@ if st.session_state.current_page == "Dashboard":
     kpi_col1, kpi_col2, kpi_col3, kpi_col4, kpi_col5, kpi_col6 = st.columns(6)
 
     with kpi_col1:
-        st.markdown(f"""
-        <div class="kpi-card kpi-card-green">
-            <div class="kpi-label">TOTAL REVENUE</div>
-            <div class="kpi-value">${revenue_current/1000000:.1f}M</div>
-            <div class="kpi-change {revenue_class}">{revenue_change} vs last period</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(key="kpi1"):
+            st.metric("TOTAL REVENUE", f"${revenue_current/1000000:.1f}M",
+                      f"{revenue_change} vs last period", delta_color="inverse")
 
     with kpi_col2:
-        st.markdown(f"""
-        <div class="kpi-card kpi-card-purple">
-            <div class="kpi-label">TOTAL ORDERS</div>
-            <div class="kpi-value">{orders_current:,}</div>
-            <div class="kpi-change {orders_class}">{orders_change} vs last period</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(key="kpi2"):
+            st.metric("TOTAL ORDERS", f"{orders_current:,}",
+                      f"{orders_change} vs last period", delta_color="inverse")
 
     with kpi_col3:
-        st.markdown(f"""
-        <div class="kpi-card kpi-card-cyan">
-            <div class="kpi-label">AVERAGE ORDER VALUE</div>
-            <div class="kpi-value">${aov_current:,.0f}</div>
-            <div class="kpi-change {aov_class}">{aov_change} vs last period</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(key="kpi3"):
+            st.metric("AVERAGE ORDER VALUE", f"${aov_current:,.0f}",
+                      f"{aov_change} vs last period", delta_color="inverse")
 
     with kpi_col4:
-        st.markdown(f"""
-        <div class="kpi-card kpi-card-blue">
-            <div class="kpi-label">ACTIVE DEALERS</div>
-            <div class="kpi-value">{dealers_current:,}</div>
-            <div class="kpi-change {dealers_class}">{dealers_change} vs last period</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(key="kpi4"):
+            st.metric("ACTIVE DEALERS", f"{dealers_current:,}",
+                      f"{dealers_change} vs last period", delta_color="inverse")
 
     with kpi_col5:
-        st.markdown(f"""
-        <div class="kpi-card kpi-card-yellow">
-            <div class="kpi-label">ACTIVE PRODUCTS</div>
-            <div class="kpi-value">{products_current:,}</div>
-            <div class="kpi-change {products_class}">{products_change} vs last period</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(key="kpi5"):
+            st.metric("ACTIVE PRODUCTS", f"{products_current:,}",
+                      f"{products_change} vs last period", delta_color="inverse")
 
     with kpi_col6:
-        st.markdown(f"""
-        <div class="kpi-card kpi-card-lime">
-            <div class="kpi-label">TOTAL UNITS</div>
-            <div class="kpi-value">{units_current:,}</div>
-            <div class="kpi-change {units_class}">{units_change} vs last period</div>
-        </div>
-        """, unsafe_allow_html=True)
+        with st.container(key="kpi6"):
+            st.metric("TOTAL UNITS", f"{units_current:,}",
+                      f"{units_change} vs last period", delta_color="inverse")
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -4320,143 +4677,6 @@ elif st.session_state.current_page == "Genie":
         "order_status":        {"title": "Order Status",        "icon_svg": _ORD_SVG, "desc": "See order status distribution, fulfillment, and bottlenecks",    "question": "Show order status distribution by count and revenue"},
     }
 
-    def process_genie_query(query: str, analysis_type: str = "custom"):
-        import time as _time
-
-        st.session_state.genie_messages.append({
-            "role": "user", "content": query,
-            "timestamp": pd.Timestamp.now(), "response": None,
-        })
-
-        _cache = st.session_state.get("genie_cache")
-        _t0 = _time.time()
-
-        _followup_signals = {"them", "those", "their", "it", "same", "above",
-                             "previous", "that", "these", "which one", "how about",
-                             "what about", "and", "also"}
-        _q_words = set(query.lower().split())
-        _is_contextual = bool(
-            _q_words & _followup_signals) and len(query.split()) < 8
-
-        _conv_history = []
-        _prior_user_msgs = [
-            m for m in st.session_state.genie_messages[:-1] if m.get("role") == "user"]
-        _is_followup = len(_prior_user_msgs) > 0
-
-        cached_resp = None
-        if _cache and not _is_contextual:
-            cached_resp = _cache.get(query)
-
-        from_cache = cached_resp is not None and _cache._is_real(cached_resp)
-
-        if from_cache:
-            response = cached_resp
-            response["cache_fetch_time_ms"] = (_time.time() - _t0) * 1000
-        else:
-            if _is_followup:
-                _all_prev = st.session_state.genie_messages[:-1]
-                _pairs, _i = [], 0
-                while _i < len(_all_prev) - 1:
-                    _um, _am = _all_prev[_i], _all_prev[_i + 1]
-                    if _um.get("role") == "user" and _am.get("role") == "assistant":
-                        _u_txt = (_um.get("content") or "").strip()
-                        _prev_resp = _am.get("response")
-                        _a_txt = ""
-                        if isinstance(_prev_resp, dict):
-                            _blocks = _prev_resp.get(
-                                "message", {}).get("content", [])
-                            _a_txt = " ".join(b.get("text", "") for b in _blocks if b.get(
-                                "type") == "text").strip()
-                        if not _a_txt:
-                            _a_txt = (_am.get("content") or "").strip()
-                        if _u_txt and _a_txt:
-                            _pairs.append((_u_txt[:1500], _a_txt[:1500]))
-                        _i += 2
-                    else:
-                        _i += 1
-                for _u_txt, _a_txt in _pairs[-4:]:
-                    _conv_history.append({"role": "user",     "content": [
-                                         {"type": "text", "text": _u_txt}]})
-                    _conv_history.append({"role": "analyst",  "content": [
-                                         {"type": "text", "text": _a_txt}]})
-
-            response = call_cortex_analyst(
-                query, conversation_history=_conv_history if _conv_history else None)
-
-            if _cache and not response.get("error") and not _is_contextual:
-                ok = _cache.set(query, response)
-                if not ok and _cache.last_error:
-                    st.session_state["_cache_write_error"] = _cache.last_error
-                else:
-                    st.session_state.pop("_cache_write_error", None)
-
-        # Bubble text — empty for cache hits (badge shows); short summary for fresh
-        if from_cache:
-            assistant_text = ""
-        else:
-            _blocks = response.get("message", {}).get(
-                "content", []) if isinstance(response, dict) else []
-            _full_text = next((b.get("text", "")
-                              for b in _blocks if b.get("type") == "text"), "")
-            if _full_text:
-                _first = _full_text.split(".")[0].strip()
-                assistant_text = (
-                    _first[:120] + "…") if len(_first) > 120 else _first
-            elif response.get("error"):
-                assistant_text = str(response["error"])
-            elif response.get("layout"):
-                assistant_text = "Analysis complete."
-            else:
-                assistant_text = ""
-
-        st.session_state.genie_messages.append({
-            "role": "assistant", "content": assistant_text[:600],
-            "timestamp": pd.Timestamp.now(), "response": response,
-            "from_cache": from_cache,
-        })
-        st.session_state.genie_messages = st.session_state.genie_messages[-GENIE_SHORT_TERM_MAX_MSGS:]
-
-        if analysis_type == "custom":
-            st.session_state.last_custom_query = query
-        st.session_state.recent_analyses.insert(0, {
-            "query": query, "type": analysis_type,
-            "timestamp": pd.Timestamp.now(), "response": response,
-        })
-        st.session_state.recent_analyses = st.session_state.recent_analyses[:10]
-        _append_genie_question(query, analysis_type)
-
-        _cp = st.session_state.get("chat_persistence")
-        _sid = st.session_state.get("genie_session_id", "")
-        _lbl = st.session_state.get("genie_session_label", "")
-        if _cp and _sid:
-            try:
-                _ti = st.session_state.get("chat_turn_index", 0)
-                _cp.save_turn(_sid, _ti, "user", query, "", "user_input", _lbl)
-                _ti += 1
-                _sql_used, _src, _full_text2 = "", "", assistant_text
-                if isinstance(response, dict):
-                    _sql_used = str(response.get("sql", "") or "")[:2000]
-                    _src = response.get("source", "")
-                    _fp = " ".join(b.get("text", "") for b in response.get(
-                        "message", {}).get("content", []) if b.get("type") == "text").strip()
-                    if _fp:
-                        _full_text2 = _fp
-                _cp.save_turn(_sid, _ti, "assistant",
-                              _full_text2[:3500], _sql_used, _src, _lbl)
-                st.session_state.chat_turn_index = _ti + 1
-            except Exception:
-                pass
-
-        _msg_count = len(st.session_state.get("genie_messages", []))
-        _mem_obj = st.session_state.get("genie_memory")
-        if _mem_obj and _msg_count % 10 == 0:
-            try:
-                _mem_obj.refresh()
-            except Exception:
-                pass
-
-        return response
-
     # Prefill from other pages
     prefill_q = st.session_state.pop("genie_prefill_question", None)
     if prefill_q and isinstance(prefill_q, str) and prefill_q.strip():
@@ -4503,7 +4723,7 @@ elif st.session_state.current_page == "Genie":
                     <div style="font-size:12px;color:#64748b;line-height:1.4;">{analysis['desc']}</div>
                 </div>
                 """, unsafe_allow_html=True)
-                if st.form_submit_button("Select", use_container_width=True):
+                if st.form_submit_button("AskGenie", use_container_width=True):
                     clicked_key = key
 
     if clicked_key is not None:
@@ -4776,7 +4996,7 @@ elif st.session_state.current_page == "Genie":
 
                 try:
                     with st.spinner("Summarizing conversation..."):
-                        sum_prompt = f"""Summarize this sales & operations analytics conversation in 4-5 bullet points. 
+                        sum_prompt = """Summarize this sales & operations analytics conversation in 4-5 bullet points. 
                                     Keep key findings, dealer names, and important numbers:"""
                         _tdf = cortex_complete(sum_prompt)
 
@@ -5292,6 +5512,127 @@ elif st.session_state.current_page == "Genie":
                 st.rerun()
 
 
+# ================= AI AGENTS PAGE =================
+elif st.session_state.current_page == "AI Agents":
+    st.markdown("""
+    <style>
+    .ai-banner{
+      border-radius:14px;
+      padding:28px 24px 18px 24px;
+      background:linear-gradient(135deg,#1d4ed8 0%, #4f46e5 100%);
+      color:#fff;
+      margin:6px 0 14px 0;
+      box-shadow:0 8px 24px rgba(37,99,235,.18);
+    }
+    .ai-banner-title{
+      font-size:40px;
+      font-weight:900;
+      line-height:1.05;
+      margin:0 0 10px 0;
+      letter-spacing:.2px;
+    }
+    .ai-banner-sub{
+      font-size:14px;
+      opacity:.95;
+      margin:0;
+    }
+    .ai-meta{
+      color:#64748b;
+      font-size:13px;
+      font-weight:600;
+      margin:8px 0 14px 0;
+    }
+    .ai-card{
+      background:#fff;
+      border:1.5px solid #e5e7eb;
+      border-radius:14px;
+      padding:16px 16px 14px 16px;
+      height:260px;
+      box-shadow:0 2px 8px rgba(2,8,23,.04);
+      display:flex;
+      flex-direction:column;
+    }
+    .ai-icon{
+      width:38px;height:38px;border-radius:10px;
+      display:flex;align-items:center;justify-content:center;
+      margin-bottom:12px;color:#fff;font-size:18px;font-weight:900;
+    }
+    .ai-icon-drop{ background:linear-gradient(135deg,#2563eb,#06b6d4); }
+    .ai-icon-velocity{ background:linear-gradient(135deg,#7c3aed,#4f46e5); }
+    .ai-icon-smart{ background:linear-gradient(135deg,#0ea5e9,#14b8a6); }
+    .ai-card-title{ font-size:30px; font-weight:900; color:#0f172a; margin:0 0 10px 0; line-height:1.05; }
+    .ai-card-desc{ font-size:14px; color:#475569; line-height:1.55; margin:0; }
+    .ai-card-desc{
+      display:-webkit-box;
+      -webkit-line-clamp:6;
+      -webkit-box-orient:vertical;
+      overflow:hidden;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="ai-banner">
+      <div class="ai-banner-title">AI Agents</div>
+      <p class="ai-banner-sub">
+        Autonomous multi-step workflows that analyse your order data, diagnose issues, optimise fulfillment routing,
+        generate AI action plans and produce exportable reports - all in one click.
+      </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown(
+        '<div class="ai-meta">Data available: 2024-01-01 -> 2026-02-11 | 60 dealers | 10,000 orders</div>',
+        unsafe_allow_html=True
+    )
+
+    c1, c2, c3 = st.columns(3, gap="medium")
+    with c1:
+        st.markdown("""
+        <div class="ai-card">
+          <div class="ai-icon ai-icon-drop">🔎</div>
+          <div class="ai-card-title">Order Drop-Off Agent</div>
+          <p class="ai-card-desc">
+            Finds every stuck ORDER ID in your pipeline right now. Shows exactly how many days each order has been sitting at
+            the same status, detects SLA breaches using expected vs actual delivery dates, and generates a per-order action list
+            your ops team can act on directly.
+          </p>
+        </div>
+        """, unsafe_allow_html=True)
+        st.button("Launch Order Drop-Off Agent",
+                  use_container_width=True, key="btn_launch_dropoff")
+
+    with c2:
+        st.markdown("""
+        <div class="ai-card">
+          <div class="ai-icon ai-icon-velocity">🧭</div>
+          <div class="ai-card-title">Order Velocity Agent</div>
+          <p class="ai-card-desc">
+            Finds specific dealer-product combinations that are overdue for reorder right now - based on each dealer's own
+            historical reorder cycle. Generates a proactive outreach task list with channel, message hook and urgency - before
+            revenue is lost.
+          </p>
+        </div>
+        """, unsafe_allow_html=True)
+        st.button("Launch Order Velocity Agent",
+                  use_container_width=True, key="btn_launch_velocity")
+
+    with c3:
+        st.markdown("""
+        <div class="ai-card">
+          <div class="ai-icon ai-icon-smart">🚚</div>
+          <div class="ai-card-title">Smart Fulfillment Agent</div>
+          <p class="ai-card-desc">
+            Optimises order routing across your warehouses, dark stores and retail outlets. For any product going to any region,
+            finds the fastest node (Speed mode) or the cheapest node (Cost mode) with full stock check, carrier, cost and
+            delivery-day breakdown.
+          </p>
+        </div>
+        """, unsafe_allow_html=True)
+        st.button("Launch Smart Fulfillment Agent",
+                  use_container_width=True, key="btn_launch_smart")
+
+
 # ================= ORDER LIFE CYCLE PAGE =================
 elif st.session_state.current_page == "Order Life Cycle":
     st.title("Order Details Lookup")
@@ -5407,57 +5748,67 @@ elif st.session_state.current_page == "Order Life Cycle":
                             EFFECTIVE_DATE
                     """)
 
-                    # Order Summary: Display as rectangular tiles (one per order) styled like KPIs
+                    # Order Summary: Display as dedicated cards
                     if not order_summary.empty:
                         st.markdown(
                             '<h2 style="font-size: 24px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Order Summary</h2>', unsafe_allow_html=True)
 
-                        # Display multiple tiles if multiple orders selected
-                        num_orders = len(order_summary)
-                        cols_per_row = 3
-                        num_rows = (num_orders + cols_per_row -
-                                    1) // cols_per_row
+                        summary_cols = st.columns(3)
+                        for idx, (_, summary_row) in enumerate(order_summary.iterrows()):
+                            order_date_str = summary_row['ORDER_DATE'].strftime(
+                                '%Y-%m-%d') if pd.notna(summary_row['ORDER_DATE']) else 'N/A'
+                            total_amount = f"${float(summary_row['TOTAL_AMOUNT']):,.2f}" if pd.notna(
+                                summary_row['TOTAL_AMOUNT']) else "$0.00"
+                            total_quantity = int(summary_row['TOTAL_QUANTITY']) if pd.notna(
+                                summary_row['TOTAL_QUANTITY']) else 0
+                            expected_delivery_date = summary_row['EXPECTED_DELIVERY_DATE'].strftime(
+                                '%Y-%m-%d') if pd.notna(summary_row['EXPECTED_DELIVERY_DATE']) else 'N/A'
 
-                        for row_idx in range(num_rows):
-                            cols = st.columns(cols_per_row)
-                            for col_idx in range(cols_per_row):
-                                order_idx = row_idx * cols_per_row + col_idx
-                                if order_idx < num_orders:
-                                    summary_row = order_summary.iloc[order_idx]
-                                    order_date_str = summary_row['ORDER_DATE'].strftime(
-                                        '%Y-%m-%d') if pd.notna(summary_row['ORDER_DATE']) else 'N/A'
-                                    total_amount = f"${float(summary_row['TOTAL_AMOUNT']):,.2f}" if pd.notna(
-                                        summary_row['TOTAL_AMOUNT']) else "$0.00"
-                                    total_quantity = int(summary_row['TOTAL_QUANTITY']) if pd.notna(
-                                        summary_row['TOTAL_QUANTITY']) else 0
-                                    expected_delivery_date = summary_row['EXPECTED_DELIVERY_DATE'].strftime(
-                                        '%Y-%m-%d') if pd.notna(summary_row['EXPECTED_DELIVERY_DATE']) else 'N/A'
-
-                                    with cols[col_idx]:
-                                        # Rectangular tile with single color like KPIs
-                                        st.markdown(f"""
-                                            <div class="kpi-card kpi-card-blue" style="margin-bottom: 16px;">
-                                                <div class="kpi-label">ORDER ID: {summary_row['ORDER_ID']}</div>
-                                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; text-align: left;">
-                                                    <div>
-                                                        <div style="font-size: 11px; opacity: 0.8; margin-bottom: 4px;">Order Date</div>
-                                                        <div style="font-size: 14px; font-weight: 600;">{order_date_str}</div>
-                                                    </div>
-                                                    <div>
-                                                        <div style="font-size: 11px; opacity: 0.8; margin-bottom: 4px;">Quantity</div>
-                                                        <div style="font-size: 14px; font-weight: 600;">{total_quantity}</div>
-                                                    </div>
-                                                    <div>
-                                                        <div style="font-size: 11px; opacity: 0.8; margin-bottom: 4px;">Total Amount</div>
-                                                        <div style="font-size: 16px; font-weight: 700;">{total_amount}</div>
-                                                    </div>
-                                                    <div>
-                                                        <div style="font-size: 11px; opacity: 0.8; margin-bottom: 4px;">Expected Delivery Date</div>
-                                                        <div style="font-size: 14px; font-weight: 600;">{expected_delivery_date}</div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        """, unsafe_allow_html=True)
+                            with summary_cols[idx % 3]:
+                                st.markdown(f"""
+                                <div style="
+                                    width: 100%;
+                                    background: #dbeafe;
+                                    border: 1px solid #bfdbfe;
+                                    border-radius: 16px;
+                                    padding: 18px 20px;
+                                    margin: 0 0 16px 0;
+                                    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+                                ">
+                                    <div style="
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        color: #334155;
+                                        text-transform: uppercase;
+                                        letter-spacing: 0.4px;
+                                        margin-bottom: 12px;
+                                    ">
+                                        ORDER ID: {summary_row['ORDER_ID']}
+                                    </div>
+                                    <div style="
+                                        display: grid;
+                                        grid-template-columns: 1fr 1fr;
+                                        gap: 14px 28px;
+                                    ">
+                                        <div>
+                                            <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Order Date</div>
+                                            <div style="font-size: 15px; font-weight: 700; color: #0f172a; line-height: 1.2;">{order_date_str}</div>
+                                        </div>
+                                        <div>
+                                            <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Quantity</div>
+                                            <div style="font-size: 15px; font-weight: 700; color: #0f172a; line-height: 1.2;">{total_quantity}</div>
+                                        </div>
+                                        <div>
+                                            <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Total Amount</div>
+                                            <div style="font-size: 17px; font-weight: 800; color: #0f172a; line-height: 1.2;">{total_amount}</div>
+                                        </div>
+                                        <div>
+                                            <div style="font-size: 12px; color: #64748b; margin-bottom: 4px;">Expected Delivery Date</div>
+                                            <div style="font-size: 15px; font-weight: 700; color: #0f172a; line-height: 1.2;">{expected_delivery_date}</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            """, unsafe_allow_html=True)
 
                         st.markdown("<br>", unsafe_allow_html=True)
 
@@ -5507,199 +5858,238 @@ elif st.session_state.current_page == "Order Life Cycle":
                     </style>
                     """, unsafe_allow_html=True)
 
-                    tab1, tab2, tab3 = st.tabs(
-                        ["Product Info", "Dealer Info", "Bill Of Materials"])
+                    # Render Order Details inside a card-style container
+                    details_card = st.container(
+                        border=True, key="order_details_card")
+                    with details_card:
+                        st.markdown("""
+                        <style>
+                        .st-key-order_details_card div[data-testid="stVerticalBlockBorderWrapper"] {
+                            background: #dbeafe !important;
+                            border: 1px solid #bfdbfe !important;
+                            border-radius: 14px !important;
+                            box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08) !important;
+                            padding: 14px 16px 18px 16px !important;
+                        }
+                        .st-key-order_details_card [data-testid="stTabs"] > div > div {
+                            background: rgba(191, 219, 254, 0.55) !important;
+                            border-radius: 10px !important;
+                            box-shadow: none !important;
+                        }
+                        .st-key-order_details_card .stTabs [data-baseweb="tab"] {
+                            color: #334155 !important;
+                            font-weight: 600 !important;
+                            border-radius: 8px 8px 0 0 !important;
+                        }
+                        .st-key-order_details_card .stTabs [aria-selected="true"] {
+                            background: #1e40af !important;
+                            color: #ffffff !important;
+                            border-bottom: 2px solid #1e40af !important;
+                        }
+                        .st-key-order_details_card .stTabs [aria-selected="true"] * {
+                            color: #ffffff !important;
+                        }
+                        .st-key-order_details_card .stTabs [aria-selected="false"] {
+                            background: transparent !important;
+                            color: #334155 !important;
+                            border-bottom: 2px solid transparent !important;
+                        }
+                        </style>
+                        """, unsafe_allow_html=True)
 
-                    with tab1:
-                        st.markdown(
-                            '<h2 style="font-size: 28px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Product Information</h2>', unsafe_allow_html=True)
+                        tab1, tab2, tab3 = st.tabs(
+                            ["Product Info", "Dealer Info", "Bill Of Materials"])
 
-                        product_ids = (
-                            product_rows["PRODUCT_ID"]
-                            .dropna()
-                            .astype(str)
-                            .unique()
-                            .tolist()
-                        )
+                        with tab1:
+                            st.markdown(
+                                '<h2 style="font-size: 28px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Product Information</h2>', unsafe_allow_html=True)
 
-                        if product_ids:
-                            product_ids_safe = ",".join(
-                                "'" + pid.replace("'", "''") + "'"
-                                for pid in product_ids
+                            product_ids = (
+                                product_rows["PRODUCT_ID"]
+                                .dropna()
+                                .astype(str)
+                                .unique()
+                                .tolist()
                             )
 
-                            product_info = run_query(f"""
-                                WITH ordered AS (
-                                        SELECT
-                                        c.PRODUCT_ID,
-                                        c.PRODUCT_NAME,
-                                        c.MATERIAL_TYPE,
-                                        c.MATERIAL_GROUP,
-                                        c.PRODUCT_HIERARCHY,
-                                        c.UNIT_OF_MEASURE,
-                                        c.PRODUCT_TYPE,
-                                        c.PRODUCT_CATEGORY,
-                                        c.PRODUCT_FAMILY,
-                                        c.PRODUCT_GROUP,
-                                        c.CONFIG_ID,
-                                        c.CONFIG_NAME,
-                                        c.CONFIG_TYPE,
-                                        c.CONFIG_STATUS,
-                                        c.IS_DEFAULT_CONFIG,
-                                        c.UNIT_PRICE,
-                                        o.TOTAL_QUANTITY_ORDERED,
-                                        ROW_NUMBER() OVER (
-                                                PARTITION BY c.PRODUCT_ID
-                                                ORDER BY c.IS_DEFAULT_CONFIG DESC
-                                        ) AS rn
-                                        FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.PRODUCT_CATALOG_VW c
-                                        JOIN (
-                                            SELECT
-                                            PRODUCT_ID,
-                                            CONFIG_ID,
-                                            QUANTITY AS TOTAL_QUANTITY_ORDERED
-                                            FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.FACT_ORDER_HISTORY_VW
-                                            WHERE {order_filter}
-                                            ) o ON c.PRODUCT_ID = o.PRODUCT_ID AND c.CONFIG_ID = o.CONFIG_ID
-                                        )
-                                        SELECT * FROM ordered WHERE rn = 1 ORDER BY PRODUCT_NAME;
-                            """)
-
-                            if not product_info.empty:
-                                for col in ["UNIT_PRICE"]:
-                                    product_info[col] = product_info[col].apply(
-                                        lambda x: f"${float(x):,.2f}" if x else "$0.00"
-                                    )
-
-                                product_info["TOTAL_QUANTITY_ORDERED"] = (
-                                    product_info["TOTAL_QUANTITY_ORDERED"].fillna(
-                                        0).astype(int)
+                            if product_ids:
+                                product_ids_safe = ",".join(
+                                    "'" + pid.replace("'", "''") + "'"
+                                    for pid in product_ids
                                 )
 
-                                product_info["IS_DEFAULT_CONFIG"] = product_info[
-                                    "IS_DEFAULT_CONFIG"
-                                ].apply(lambda x: "Yes" if x else "No")
+                                product_info = run_query(f"""
+                                    WITH ordered AS (
+                                            SELECT
+                                            c.PRODUCT_ID,
+                                            c.PRODUCT_NAME,
+                                            c.MATERIAL_TYPE,
+                                            c.MATERIAL_GROUP,
+                                            c.PRODUCT_HIERARCHY,
+                                            c.UNIT_OF_MEASURE,
+                                            c.PRODUCT_TYPE,
+                                            c.PRODUCT_CATEGORY,
+                                            c.PRODUCT_FAMILY,
+                                            c.PRODUCT_GROUP,
+                                            c.CONFIG_ID,
+                                            c.CONFIG_NAME,
+                                            c.CONFIG_TYPE,
+                                            c.CONFIG_STATUS,
+                                            c.IS_DEFAULT_CONFIG,
+                                            c.UNIT_PRICE,
+                                            o.TOTAL_QUANTITY_ORDERED,
+                                            ROW_NUMBER() OVER (
+                                                    PARTITION BY c.PRODUCT_ID
+                                                    ORDER BY c.IS_DEFAULT_CONFIG DESC
+                                            ) AS rn
+                                            FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.PRODUCT_CATALOG_VW c
+                                            JOIN (
+                                                SELECT
+                                                PRODUCT_ID,
+                                                CONFIG_ID,
+                                                QUANTITY AS TOTAL_QUANTITY_ORDERED
+                                                FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.FACT_ORDER_HISTORY_VW
+                                                WHERE {order_filter}
+                                                ) o ON c.PRODUCT_ID = o.PRODUCT_ID AND c.CONFIG_ID = o.CONFIG_ID
+                                            )
+                                            SELECT * FROM ordered WHERE rn = 1 ORDER BY PRODUCT_NAME;
+                                """)
 
-                                st.dataframe(
-                                    product_info, use_container_width=True, hide_index=True)
-                            else:
-                                st.warning(
-                                    "No product configurations matched the order unit price")
-                        else:
-                            st.info(
-                                "No products associated with selected orders")
+                                if not product_info.empty:
+                                    for col in ["UNIT_PRICE"]:
+                                        product_info[col] = product_info[col].apply(
+                                            lambda x: f"${float(x):,.2f}" if x else "$0.00"
+                                        )
 
-                    with tab2:
-                        st.markdown(
-                            '<h2 style="font-size: 28px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Dealer Information</h2>', unsafe_allow_html=True)
-
-                        dealer_ids = (
-                            order_details['DEALER_ID']
-                            .dropna()
-                            .astype(str)
-                            .unique()
-                            .tolist()
-                        )
-
-                        if dealer_ids:
-                            dealer_ids_safe = ",".join(
-                                "'" + did.replace("'", "''") + "'"
-                                for did in dealer_ids
-                            )
-
-                            dealer_info = run_query(f"""
-                                SELECT
-                                    f.DEALER_ID,
-                                    f.DEALER_NAME,
-                                    d.DEALER_TYPE,
-                                    d.COUNTRY,
-                                    d.REGION,
-                                    d.CITY,
-                                    SUM(k.ORDER_COUNT) AS TOTAL_ORDERS,
-                                    SUM(k.REVENUE) AS TOTAL_REVENUE,
-                                    CASE
-                                        WHEN SUM(k.ORDER_COUNT) > 0
-                                        THEN SUM(k.REVENUE) / SUM(k.ORDER_COUNT)
-                                        ELSE 0
-                                    END AS AVG_ORDER_VALUE
-                                FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.FACT_ORDER_HISTORY_VW f
-                                LEFT JOIN {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.DEALER_ORDER_KPI_VW k
-                                    ON f.DEALER_ID = k.DEALER_ID
-                                LEFT JOIN (SELECT * FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.DIM_DEALER_VW WHERE CURRENT_FLAG = 'Y') d
-                                    ON f.DEALER_ID = d.DEALER_ID
-                                WHERE f.DEALER_ID IN ({dealer_ids_safe})
-                                GROUP BY
-                                    f.DEALER_ID,
-                                    f.DEALER_NAME,
-                                    d.DEALER_TYPE,
-                                    d.COUNTRY,
-                                    d.REGION,
-                                    d.CITY
-                                ORDER BY f.DEALER_NAME
-                            """)
-
-                            dealer_info["TOTAL_REVENUE"] = dealer_info["TOTAL_REVENUE"].apply(
-                                lambda x: f"${float(x):,.0f}" if x else "$0"
-                            )
-                            dealer_info["AVG_ORDER_VALUE"] = dealer_info["AVG_ORDER_VALUE"].apply(
-                                lambda x: f"${float(x):,.0f}" if x else "$0"
-                            )
-                            dealer_info["TOTAL_ORDERS"] = dealer_info["TOTAL_ORDERS"].fillna(
-                                0).astype(int)
-
-                            st.dataframe(
-                                dealer_info, use_container_width=True, hide_index=True)
-                        else:
-                            st.info("No dealer information found")
-
-                    with tab3:
-                        st.markdown(
-                            '<h2 style="font-size: 28px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Bill Of Materials</h2>', unsafe_allow_html=True)
-
-                        parent_product_ids = (
-                            product_rows['PRODUCT_ID']
-                            .dropna()
-                            .astype(str)
-                            .unique()
-                            .tolist()
-                        )
-
-                        if parent_product_ids:
-                            parent_product_ids_safe = ",".join(
-                                "'" + pid.replace("'", "''") + "'"
-                                for pid in parent_product_ids
-                            )
-
-                            bom_df = run_query(f"""
-                                SELECT
-                                    PARENT_PRODUCT,
-                                    PARENT_PRODUCT_NAME,
-                                    CHILD_PRODUCT,
-                                    CHILD_PRODUCT_NAME,
-                                    QUANTITY_PER_ASSEMBLY,
-                                    UNIT_OF_MEASURE,
-                                    SCRAP_FACTOR
-                                FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.PRODUCT_BOM_VW
-                                WHERE PARENT_PRODUCT IN ({parent_product_ids_safe})
-                                ORDER BY
-                                    PARENT_PRODUCT
-                            """)
-
-                            if not bom_df.empty:
-
-                                if "SCRAP_FACTOR" in bom_df.columns:
-                                    bom_df["SCRAP_FACTOR"] = bom_df["SCRAP_FACTOR"].apply(
-                                        lambda x: f"{float(x) * 100:.1f}%" if x is not None else "0.0%"
+                                    product_info["TOTAL_QUANTITY_ORDERED"] = (
+                                        product_info["TOTAL_QUANTITY_ORDERED"].fillna(
+                                            0).astype(int)
                                     )
 
-                                st.dataframe(
-                                    bom_df, use_container_width=True, hide_index=True)
+                                    product_info["IS_DEFAULT_CONFIG"] = product_info[
+                                        "IS_DEFAULT_CONFIG"
+                                    ].apply(lambda x: "Yes" if x else "No")
+
+                                    st.dataframe(
+                                        product_info, use_container_width=True, hide_index=True)
+                                else:
+                                    st.warning(
+                                        "No product configurations matched the order unit price")
                             else:
                                 st.info(
-                                    "No BOM data found for selected products")
-                        else:
-                            st.info(
-                                "No parent products available for BOM lookup")
+                                    "No products associated with selected orders")
+
+                        with tab2:
+                            st.markdown(
+                                '<h2 style="font-size: 28px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Dealer Information</h2>', unsafe_allow_html=True)
+
+                            dealer_ids = (
+                                order_details['DEALER_ID']
+                                .dropna()
+                                .astype(str)
+                                .unique()
+                                .tolist()
+                            )
+
+                            if dealer_ids:
+                                dealer_ids_safe = ",".join(
+                                    "'" + did.replace("'", "''") + "'"
+                                    for did in dealer_ids
+                                )
+
+                                dealer_info = run_query(f"""
+                                    SELECT
+                                        f.DEALER_ID,
+                                        f.DEALER_NAME,
+                                        d.DEALER_TYPE,
+                                        d.COUNTRY,
+                                        d.REGION,
+                                        d.CITY,
+                                        SUM(k.ORDER_COUNT) AS TOTAL_ORDERS,
+                                        SUM(k.REVENUE) AS TOTAL_REVENUE,
+                                        CASE
+                                            WHEN SUM(k.ORDER_COUNT) > 0
+                                            THEN SUM(k.REVENUE) / SUM(k.ORDER_COUNT)
+                                            ELSE 0
+                                        END AS AVG_ORDER_VALUE
+                                    FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.FACT_ORDER_HISTORY_VW f
+                                    LEFT JOIN {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.DEALER_ORDER_KPI_VW k
+                                        ON f.DEALER_ID = k.DEALER_ID
+                                    LEFT JOIN (SELECT * FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.DIM_DEALER_VW WHERE CURRENT_FLAG = 'Y') d
+                                        ON f.DEALER_ID = d.DEALER_ID
+                                    WHERE f.DEALER_ID IN ({dealer_ids_safe})
+                                    GROUP BY
+                                        f.DEALER_ID,
+                                        f.DEALER_NAME,
+                                        d.DEALER_TYPE,
+                                        d.COUNTRY,
+                                        d.REGION,
+                                        d.CITY
+                                    ORDER BY f.DEALER_NAME
+                                """)
+
+                                dealer_info["TOTAL_REVENUE"] = dealer_info["TOTAL_REVENUE"].apply(
+                                    lambda x: f"${float(x):,.0f}" if x else "$0"
+                                )
+                                dealer_info["AVG_ORDER_VALUE"] = dealer_info["AVG_ORDER_VALUE"].apply(
+                                    lambda x: f"${float(x):,.0f}" if x else "$0"
+                                )
+                                dealer_info["TOTAL_ORDERS"] = dealer_info["TOTAL_ORDERS"].fillna(
+                                    0).astype(int)
+
+                                st.dataframe(
+                                    dealer_info, use_container_width=True, hide_index=True)
+                            else:
+                                st.info("No dealer information found")
+
+                        with tab3:
+                            st.markdown(
+                                '<h2 style="font-size: 28px; font-weight: 700; margin-bottom: 20px; color: #1F2937;">Bill Of Materials</h2>', unsafe_allow_html=True)
+
+                            parent_product_ids = (
+                                product_rows['PRODUCT_ID']
+                                .dropna()
+                                .astype(str)
+                                .unique()
+                                .tolist()
+                            )
+
+                            if parent_product_ids:
+                                parent_product_ids_safe = ",".join(
+                                    "'" + pid.replace("'", "''") + "'"
+                                    for pid in parent_product_ids
+                                )
+
+                                bom_df = run_query(f"""
+                                    SELECT
+                                        PARENT_PRODUCT,
+                                        PARENT_PRODUCT_NAME,
+                                        CHILD_PRODUCT,
+                                        CHILD_PRODUCT_NAME,
+                                        QUANTITY_PER_ASSEMBLY,
+                                        UNIT_OF_MEASURE,
+                                        SCRAP_FACTOR
+                                    FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.PRODUCT_BOM_VW
+                                    WHERE PARENT_PRODUCT IN ({parent_product_ids_safe})
+                                    ORDER BY
+                                        PARENT_PRODUCT
+                                """)
+
+                                if not bom_df.empty:
+
+                                    if "SCRAP_FACTOR" in bom_df.columns:
+                                        bom_df["SCRAP_FACTOR"] = bom_df["SCRAP_FACTOR"].apply(
+                                            lambda x: f"{float(x) * 100:.1f}%" if x is not None else "0.0%"
+                                        )
+
+                                    st.dataframe(
+                                        bom_df, use_container_width=True, hide_index=True)
+                                else:
+                                    st.info(
+                                        "No BOM data found for selected products")
+                            else:
+                                st.info(
+                                    "No parent products available for BOM lookup")
 
             except Exception as e:
                 st.error(f"Error loading orders: {str(e)}")
