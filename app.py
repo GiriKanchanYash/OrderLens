@@ -45,6 +45,18 @@ if not logger.handlers:
 
 # from warehouse_setup import ensure_warehouse_tables
 
+
+# ---------- Dependencies Check ----------
+try:
+    import streamlit as st
+    import pandas as pd
+    import altair as alt
+except ImportError as e:
+    st.error(
+        f"Missing dependency: {e}. Please install required packages: streamlit, pandas, altair, numpy")
+    st.stop()
+
+
 # Get DB session
 session = get_active_session()
 session_wh = _get_warehouse_session()
@@ -393,6 +405,9 @@ _SS_DEFAULTS = {
     "restore_dismissed":   False,
     "_all_sessions_cache": [],
     "show_chats_panel":    False,
+    "show_loaded_chat_history": False,
+    "loaded_chat_history": [],
+    "loaded_chat_date": "",
     "_genie_summary":      "",
     # YAML auto-sync
     "yaml_sync_done":      False,
@@ -4867,6 +4882,8 @@ elif st.session_state.current_page == "Genie":
 
             # ── Header row ───────────────────────────────────────────────────
             _msg_count = len(st.session_state.get("genie_messages", []))
+            _loaded_hist_count = len(st.session_state.get("loaded_chat_history", [])) if st.session_state.get("show_loaded_chat_history", False) else 0
+            _effective_msg_count = _msg_count if _msg_count > 0 else (_loaded_hist_count * 2)
             _hdr_left, _hdr_chats, _hdr_sum, _hdr_dl, _hdr_clr = st.columns(
                 [2.2, 0.9, 1.2, 1.1, 0.9], gap="small")
             with _hdr_left:
@@ -4876,28 +4893,41 @@ elif st.session_state.current_page == "Genie":
                 _chats_clicked = st.button(
                     "Chats", use_container_width=True, help="Browse & resume previous conversations", key="btn_genie_chats")
             with _hdr_sum:
-                _sum_clicked = st.button("Summarize", use_container_width=True, disabled=_msg_count <
+                _sum_clicked = st.button("Summarize", use_container_width=True, disabled=_effective_msg_count <
                                          2, help="Compress conversation into a summary", key="btn_genie_summarize")
             with _hdr_dl:
                 def _build_md_export():
                     _msgs = st.session_state.get("genie_messages", [])
-                    _label = st.session_state.get(
+                    _loaded = st.session_state.get("loaded_chat_history", [])
+                    _is_loaded = st.session_state.get("show_loaded_chat_history", False) and bool(_loaded)
+                    _label = f"Chat History - {st.session_state.get('loaded_chat_date', '')}" if _is_loaded else st.session_state.get(
                         "genie_session_label", "Chat")
                     _lines = [
                         f"# OrderLens Genie — {_label}", "", f"*Exported {datetime.now().strftime('%Y-%m-%d %H:%M')}*", "", "---", ""]
-                    for _m in _msgs:
-                        if not _m.get("content"):
-                            continue
-                        _pfx = "**You:** " if _m["role"] == "user" else "**Genie:** "
-                        _lines.append(_pfx + _m["content"])
-                        _lines.append("")
+                    if _is_loaded:
+                        for _item in _loaded:
+                            _q = str(_item.get("question", "") or "").strip()
+                            _s = str(_item.get("summary", "") or "").strip()
+                            if _q:
+                                _lines.append("**You:** " + _q)
+                                _lines.append("")
+                            if _s:
+                                _lines.append("**AI Assistant:** " + _s)
+                                _lines.append("")
+                    else:
+                        for _m in _msgs:
+                            if not _m.get("content"):
+                                continue
+                            _pfx = "**You:** " if _m["role"] == "user" else "**Genie:** "
+                            _lines.append(_pfx + _m["content"])
+                            _lines.append("")
                     return "\n".join(_lines)
                 st.download_button("Export MD", data=_build_md_export(),
                                    file_name="genie_chat_" + datetime.now().strftime("%Y%m%d_%H%M") + ".md",
                                    mime="text/markdown", use_container_width=True,
-                                   disabled=_msg_count == 0, help="Download chat as Markdown", key="btn_genie_export")
+                                   disabled=_effective_msg_count == 0, help="Download chat as Markdown", key="btn_genie_export")
             with _hdr_clr:
-                _clr_clicked = st.button("Clear", use_container_width=True, disabled=_msg_count ==
+                _clr_clicked = st.button("Clear", use_container_width=True, disabled=_effective_msg_count ==
                                          0, type="secondary", help="Clear messages & start fresh", key="btn_genie_clear")
 
             # ── Handle: Chats panel toggle ────────────────────────────────────
@@ -4905,13 +4935,10 @@ elif st.session_state.current_page == "Genie":
                 _prev_show = st.session_state.get("show_chats_panel", False)
                 st.session_state["show_chats_panel"] = not _prev_show
                 if not _prev_show:
-                    _cp_tmp = st.session_state.get("chat_persistence")
-                    st.session_state["_all_sessions_cache"] = (
-                        _cp_tmp.load_all_sessions() if _cp_tmp else [])
+                    st.session_state["_all_sessions_cache"] = _load_user_chat_dates()
 
             if st.session_state.get("show_chats_panel", False):
                 _all_sess2 = st.session_state.get("_all_sessions_cache", [])
-                _cp_tmp2 = st.session_state.get("chat_persistence")
                 with st.container(border=True):
                     st.markdown(
                         "<div style='font-size:14px;font-weight:800;color:#1e40af;margin-bottom:12px;'> Previous Conversations</div>", unsafe_allow_html=True)
@@ -4927,6 +4954,9 @@ elif st.session_state.current_page == "Genie":
                         st.session_state.chat_turn_index = 0
                         st.session_state.restore_dismissed = True
                         st.session_state.restore_offered = False
+                        st.session_state["show_loaded_chat_history"] = False
+                        st.session_state["loaded_chat_history"] = []
+                        st.session_state["loaded_chat_date"] = ""
                         st.session_state["show_chats_panel"] = False
                         st.rerun()
                     st.markdown("<div style='height:6px'></div>",
@@ -4936,24 +4966,50 @@ elif st.session_state.current_page == "Genie":
                             "No previous conversations found in the last 7 days.")
                     else:
                         for _si3, _sess3 in enumerate(_all_sess2):
-                            _age_h3 = _sess3.get("age_hours", 0)
-                            _label3 = _sess3.get(
-                                "session_label", "Previous chat")
-                            _nturns3 = _sess3.get("turn_count", 0)
-                            _age_str3 = (
-                                "< 1 hr ago" if _age_h3 < 1 else f"{int(_age_h3)}h ago" if _age_h3 < 24 else f"{int(_age_h3/24)}d {int(_age_h3%24)}h ago")
-                            _is_cur3 = _sess3.get("session_id") == st.session_state.get(
-                                "genie_session_id", "")
+                            _chat_date3 = str(_sess3.get("ChatDate", "")).strip()
+                            _nturns3 = int(_sess3.get("count", 0) or 0)
+                            _last_msg3 = str(_sess3.get("last_message_at", "") or "").strip()
+                            _age_str3 = ""
+                            try:
+                                if _last_msg3 and _last_msg3.lower() not in ("none", "nan"):
+                                    try:
+                                        _chat_dt3 = datetime.fromisoformat(_last_msg3)
+                                    except ValueError:
+                                        _chat_dt3 = datetime.strptime(_last_msg3[:19], "%Y-%m-%d %H:%M:%S")
+                                else:
+                                    _chat_dt3 = datetime.strptime(_chat_date3[:10], "%Y-%m-%d")
+                                _mins3 = int((datetime.now() - _chat_dt3).total_seconds() // 60)
+                                _hrs3 = _mins3 // 60
+                                if _mins3 < 1:
+                                    _age_str3 = "just now"
+                                elif _mins3 < 60:
+                                    _age_str3 = f"{_mins3}m ago"
+                                elif _hrs3 < 24:
+                                    _age_str3 = f"{_hrs3}h ago"
+                                elif _hrs3 < 48:
+                                    _age_str3 = "1 day ago"
+                                else:
+                                    _age_str3 = f"{_hrs3 // 24} days ago"
+                            except Exception:
+                                _age_str3 = ""
+                            _is_cur3 = (
+                                st.session_state.get("show_loaded_chat_history", False)
+                                and st.session_state.get("loaded_chat_date", "") == _chat_date3
+                            )
                             _sl3, _sr3 = st.columns([5, 2], gap="small")
                             with _sl3:
                                 _cur_tag3 = (
                                     " <span style='background:#dcfce7;color:#15803d;border-radius:10px;padding:1px 8px;font-size:10px;font-weight:700;'>Active</span>") if _is_cur3 else ""
+                                _label3 = f"Chat on {_chat_date3}"
+                                _meta3 = f"{_nturns3} messages"
+                                if _age_str3:
+                                    _meta3 = f"{_meta3} &nbsp;·&nbsp; {_age_str3}"
                                 st.markdown(
                                     f"<div style='background:{'#eff6ff' if _is_cur3 else '#f8fafc'};"
                                     f"border:1px solid {'#bfdbfe' if _is_cur3 else '#e2e8f0'};"
                                     f"border-radius:10px;padding:9px 12px;margin-bottom:4px;'>"
                                     f"<div style='font-size:13px;font-weight:700;color:#0f172a;'>{html.escape(_label3)}{_cur_tag3}</div>"
-                                    f"<div style='font-size:11px;color:#64748b;margin-top:2px;'>{_nturns3} messages &nbsp;·&nbsp; {_age_str3}</div></div>",
+                                    f"<div style='font-size:11px;color:#64748b;margin-top:2px;'>{_meta3}</div></div>",
                                     unsafe_allow_html=True,
                                 )
                             with _sr3:
@@ -4963,15 +5019,14 @@ elif st.session_state.current_page == "Genie":
                                 else:
                                     if st.button("Resume", key=f"btn_panel_resume_{_si3}", use_container_width=True, type="primary"):
                                         with st.spinner("Loading conversation..."):
-                                            _msgs3 = _cp_tmp2.load_session_messages(
-                                                _sess3["session_id"]) if _cp_tmp2 else []
-                                        st.session_state.genie_messages = _msgs3
-                                        st.session_state.chat_turn_index = len(
-                                            _msgs3)
-                                        st.session_state.genie_session_id = _sess3["session_id"]
-                                        st.session_state.genie_session_label = _sess3["session_label"]
+                                            _chat_queries3 = _load_queries_by_date(_chat_date3)
+                                        st.session_state["loaded_chat_date"] = _chat_date3
+                                        st.session_state["loaded_chat_history"] = _chat_queries3
+                                        st.session_state["show_loaded_chat_history"] = bool(_chat_queries3)
                                         st.session_state.restore_dismissed = True
                                         st.session_state["show_chats_panel"] = False
+                                        if not _chat_queries3:
+                                            st.warning(f"No chat history found for {_chat_date3}")
                                         st.rerun()
                         st.markdown("<div style='height:4px'></div>",
                                     unsafe_allow_html=True)
@@ -5010,6 +5065,9 @@ elif st.session_state.current_page == "Genie":
                 st.session_state.chat_turn_index = 0
                 st.session_state.restore_dismissed = True
                 st.session_state.restore_offered = False
+                st.session_state["show_loaded_chat_history"] = False
+                st.session_state["loaded_chat_history"] = []
+                st.session_state["loaded_chat_date"] = ""
                 st.session_state["_all_sessions_cache"] = []
                 for _k in list(st.session_state.keys()):
                     if str(_k).startswith("_pres_") or str(_k).startswith("_pred_"):
@@ -5025,12 +5083,14 @@ elif st.session_state.current_page == "Genie":
             with st.container(height=320, border=True):
                 _all_messages = st.session_state.get("genie_messages", [])
                 _cp_ref = st.session_state.get("chat_persistence")
+                _loaded_chat = st.session_state.get("loaded_chat_history", [])
+                _loaded_date = st.session_state.get("loaded_chat_date", "")
 
                 # Session-restore picker (shown when chat is empty)
-                if (not _all_messages and _cp_ref and not st.session_state.get("restore_dismissed")):
+                if (not _all_messages and not st.session_state.get("restore_dismissed")):
                     if not st.session_state.get("restore_offered"):
                         try:
-                            _sessions = _cp_ref.load_all_sessions()
+                            _sessions = _load_user_chat_dates()
                         except Exception:
                             _sessions = []
                         st.session_state["_all_sessions_cache"] = _sessions
@@ -5039,37 +5099,95 @@ elif st.session_state.current_page == "Genie":
                 _all_sessions_restore = st.session_state.get(
                     "_all_sessions_cache", [])
 
-                if (not _all_messages and _all_sessions_restore and not st.session_state.get("restore_dismissed")):
+                if st.session_state.get("show_loaded_chat_history", False) and _loaded_chat:
+                    _bh1, _bh2 = st.columns([1, 5], gap="small")
+                    with _bh1:
+                        if st.button("← Back", key="btn_back_loaded_chat"):
+                            st.session_state["show_loaded_chat_history"] = False
+                            st.session_state["loaded_chat_history"] = []
+                            st.session_state["loaded_chat_date"] = ""
+                            st.rerun()
+                    with _bh2:
+                        st.markdown(
+                            f"<div style='font-size:15px;font-weight:800;color:#0f172a;padding-top:8px;'>Chat History - {html.escape(str(_loaded_date))}</div>",
+                            unsafe_allow_html=True,
+                        )
+                    st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+                    for _q_item in _loaded_chat:
+                        _question = str(_q_item.get("question", "") or "").strip()
+                        _summary = str(_q_item.get("summary", "") or "").strip()
+                        if _question:
+                            st.markdown(f"""
+                            <div class="g-user">
+                                <div class="g-user-inner">
+                                    <div class="g-user-lbl">You</div>
+                                    {html.escape(_question)}
+                                </div>
+                            </div>""", unsafe_allow_html=True)
+                        if _summary:
+                            st.markdown(f"""
+                            <div class="g-ai">
+                                <div class="g-ai-inner">
+                                    <div class="g-ai-lbl">AI Assistant</div>
+                                    {html.escape(_summary)}
+                                </div>
+                            </div>""", unsafe_allow_html=True)
+
+                elif (not _all_messages and _all_sessions_restore and not st.session_state.get("restore_dismissed")):
                     st.markdown("""
                     <div class="resume-banner">
                         <div style="font-size:16px;font-weight:800;color:#1e40af;margin-bottom:4px;"> Resume a previous conversation</div>
                         <div style="font-size:13px;color:#374151;margin-bottom:14px;">You have chats from the last 7 days. Pick one to continue, or start fresh.</div>
                     </div>""", unsafe_allow_html=True)
                     for _si_r, _sess_r in enumerate(_all_sessions_restore):
-                        _age_r = _sess_r.get("age_hours", 0)
-                        _label_r = _sess_r.get(
-                            "session_label", "Previous chat")
-                        _tc_r = _sess_r.get("turn_count", 0)
-                        _age_s_r = (
-                            "< 1 hr ago" if _age_r < 1 else f"{int(_age_r)}h ago" if _age_r < 24 else f"{int(_age_r/24)}d {int(_age_r%24)}h ago")
+                        _chat_date_r = str(_sess_r.get("ChatDate", "")).strip()
+                        _tc_r = int(_sess_r.get("count", 0) or 0)
+                        _last_msg_r = str(_sess_r.get("last_message_at", "") or "").strip()
+                        _age_s_r = ""
+                        try:
+                            if _last_msg_r and _last_msg_r.lower() not in ("none", "nan"):
+                                try:
+                                    _chat_dt_r = datetime.fromisoformat(_last_msg_r)
+                                except ValueError:
+                                    _chat_dt_r = datetime.strptime(_last_msg_r[:19], "%Y-%m-%d %H:%M:%S")
+                            else:
+                                _chat_dt_r = datetime.strptime(_chat_date_r[:10], "%Y-%m-%d")
+                            _mins_r = int((datetime.now() - _chat_dt_r).total_seconds() // 60)
+                            _hrs_r = _mins_r // 60
+                            if _mins_r < 1:
+                                _age_s_r = "just now"
+                            elif _mins_r < 60:
+                                _age_s_r = f"{_mins_r}m ago"
+                            elif _hrs_r < 24:
+                                _age_s_r = f"{_hrs_r}h ago"
+                            elif _hrs_r < 48:
+                                _age_s_r = "1 day ago"
+                            else:
+                                _age_s_r = f"{_hrs_r // 24} days ago"
+                        except Exception:
+                            _age_s_r = ""
                         _rcl, _rcr = st.columns([5, 2], gap="small")
                         with _rcl:
+                            _label_r = f"Chat on {_chat_date_r}"
+                            _meta_r = f"{_tc_r} messages"
+                            if _age_s_r:
+                                _meta_r = f"{_meta_r} · {_age_s_r}"
                             st.markdown(
                                 f'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;margin-bottom:6px;">'
                                 f'<div style="font-size:13px;font-weight:700;color:#0f172a;">{html.escape(_label_r)}</div>'
-                                f'<div style="font-size:11px;color:#64748b;margin-top:2px;">{_tc_r} messages · {_age_s_r}</div></div>',
+                                f'<div style="font-size:11px;color:#64748b;margin-top:2px;">{_meta_r}</div></div>',
                                 unsafe_allow_html=True,
                             )
                         with _rcr:
                             if st.button("Resume", key=f"btn_resume_r_{_si_r}", use_container_width=True, type="primary"):
                                 with st.spinner("Loading conversation..."):
-                                    _msgs_r = _cp_ref.load_session_messages(
-                                        _sess_r["session_id"])
-                                st.session_state.genie_messages = _msgs_r
-                                st.session_state.chat_turn_index = len(_msgs_r)
-                                st.session_state.genie_session_id = _sess_r["session_id"]
-                                st.session_state.genie_session_label = _sess_r["session_label"]
+                                    _chat_queries_r = _load_queries_by_date(_chat_date_r)
+                                st.session_state["loaded_chat_date"] = _chat_date_r
+                                st.session_state["loaded_chat_history"] = _chat_queries_r
+                                st.session_state["show_loaded_chat_history"] = bool(_chat_queries_r)
                                 st.session_state.restore_dismissed = True
+                                if not _chat_queries_r:
+                                    st.warning(f"No chat history found for {_chat_date_r}")
                                 st.rerun()
                     st.markdown("<div style='height:6px;'></div>",
                                 unsafe_allow_html=True)
@@ -5077,7 +5195,7 @@ elif st.session_state.current_page == "Genie":
                         st.session_state.restore_dismissed = True
                         st.rerun()
 
-                elif not _all_messages:
+                elif not _all_messages and not st.session_state.get("show_loaded_chat_history", False):
                     if not st.session_state.get("show_analysis"):
                         st.markdown("""
                         <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:500px;text-align:center;">
@@ -5086,8 +5204,8 @@ elif st.session_state.current_page == "Genie":
                             <div style="font-size:14px;color:#64748b;max-width:400px;">Ask questions about your Sales &amp; Operations data, or select a quick analysis above.</div>
                         </div>""", unsafe_allow_html=True)
 
-                # ── Render message bubbles ────────────────────────────────────
-                for _msg_idx, _msg in enumerate(_all_messages):
+                # ── Render live message bubbles ───────────────────────────────
+                for _msg_idx, _msg in enumerate([] if st.session_state.get("show_loaded_chat_history", False) else _all_messages):
                     _role = _msg.get("role", "user")
                     _content = _msg.get("content", "") or ""
                     _response = _msg.get("response")
@@ -5486,6 +5604,10 @@ elif st.session_state.current_page == "Genie":
                     send_clicked = st.form_submit_button("→")
 
             if send_clicked and user_query:
+                if st.session_state.get("show_loaded_chat_history", False):
+                    st.session_state["show_loaded_chat_history"] = False
+                    st.session_state["loaded_chat_history"] = []
+                    st.session_state["loaded_chat_date"] = ""
                 st.session_state.selected_analysis = "custom"
                 st.session_state.last_custom_query = user_query.strip()
                 st.session_state.show_analysis = True
