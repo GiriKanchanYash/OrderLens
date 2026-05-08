@@ -6256,7 +6256,8 @@ elif st.session_state.current_page == "Forecast":
             selected_month = st.selectbox(
                 "Filter by Month", options=month_options, index=0, key="forecast_month_filter")
             if selected_month != 'All':
-                forecast_month_clause = f"AND FORMAT(DATEADD(month, DATEDIFF(month, 0, f.FORECAST_PERIOD_END), 0),'yyyy-MM') = '{selected_month}'"
+                # forecast_month_clause = f"AND FORMAT(DATEADD(month, DATEDIFF(month, 0, F.FORECAST_PERIOD_END), 0),'yyyy-MM') = '{selected_month}'"
+                forecast_month_clause = f"AND FORMAT(DATEADD(month, DATEDIFF(month, 0, FORECAST_PERIOD_END), 0),'yyyy-MM') = '{selected_month}'"
             else:
                 forecast_month_clause = ""
         else:
@@ -6272,12 +6273,12 @@ elif st.session_state.current_page == "Forecast":
 
             forecast_qty = run_query(f"""
             SELECT 
-                FORMAT(DATEADD(month, DATEDIFF(month, 0, F.FORECAST_PERIOD_END), 0),'yyyy-MM') AS MONTH,
-                SUM(F.FORECAST_QUANTITY) AS QTY
-            FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.PRODUCT_FORECAST_KPI_VW F
+                FORMAT(DATEADD(month, DATEDIFF(month, 0, f.FORECAST_PERIOD_END), 0),'yyyy-MM') AS MONTH,
+                SUM(f.FORECAST_QUANTITY) AS QTY
+            FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.PRODUCT_FORECAST_KPI_VW f
             WHERE 1=1 {product_filter_clause} {forecast_month_clause}
-            GROUP BY FORMAT(DATEADD(month, DATEDIFF(month, 0, F.FORECAST_PERIOD_END), 0),'yyyy-MM')
-            ORDER BY FORMAT(DATEADD(month, DATEDIFF(month, 0, F.FORECAST_PERIOD_END), 0),'yyyy-MM')
+            GROUP BY FORMAT(DATEADD(month, DATEDIFF(month, 0, f.FORECAST_PERIOD_END), 0),'yyyy-MM')
+            ORDER BY FORMAT(DATEADD(month, DATEDIFF(month, 0, f.FORECAST_PERIOD_END), 0),'yyyy-MM')
             """)
 
             if not forecast_qty.empty:
@@ -6305,12 +6306,12 @@ elif st.session_state.current_page == "Forecast":
 
             forecast_rev = run_query(f"""
             SELECT 
-                FORMAT(DATEADD(month, DATEDIFF(month, 0, F.FORECAST_PERIOD_END), 0),'yyyy-MM') AS MONTH,
-                SUM(F.FORECAST_REVENUE) / 1000000.0 AS REVENUE_M
-            FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.PRODUCT_FORECAST_KPI_VW F
+                FORMAT(DATEADD(month, DATEDIFF(month, 0, f.FORECAST_PERIOD_END), 0),'yyyy-MM') AS MONTH,
+                SUM(f.FORECAST_REVENUE) / 1000000.0 AS REVENUE_M
+            FROM {Config.FABRIC_ORDERLENS_DATABASE}.{Config.SCHEMA}.PRODUCT_FORECAST_KPI_VW f
             WHERE 1=1 {product_filter_clause} {forecast_month_clause}
-            GROUP BY FORMAT(DATEADD(month, DATEDIFF(month, 0, F.FORECAST_PERIOD_END), 0),'yyyy-MM')
-            ORDER BY FORMAT(DATEADD(month, DATEDIFF(month, 0, F.FORECAST_PERIOD_END), 0),'yyyy-MM')
+            GROUP BY FORMAT(DATEADD(month, DATEDIFF(month, 0, f.FORECAST_PERIOD_END), 0),'yyyy-MM')
+            ORDER BY FORMAT(DATEADD(month, DATEDIFF(month, 0, f.FORECAST_PERIOD_END), 0),'yyyy-MM')
             """)
 
             if not forecast_rev.empty:
