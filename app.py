@@ -3611,8 +3611,7 @@ if st.session_state.current_page == "Dashboard":
         orders_prev_df['COUNT'].iloc[0]) if not orders_prev_df.empty else 0
     aov_current = float(
         aov_current_df['AOV'].iloc[0]) if not aov_current_df.empty else 0
-    aov_prev = float(aov_prev_df['AOV'].iloc[0]
-                     ) if not aov_prev_df.empty else 0
+    aov_prev = float(aov_prev_df['AOV'].iloc[0]) if aov_prev_df['AOV'].iloc[0] is not None else 0.0 if not aov_prev_df.empty else 0
     dealers_current = int(
         dealers_current_df['COUNT'].iloc[0]) if not dealers_current_df.empty else 0
     dealers_prev = int(
