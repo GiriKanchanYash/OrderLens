@@ -4876,318 +4876,373 @@ elif st.session_state.current_page == "Genie":
                         "Ask questions to see most frequent across all users.")
 
     # RIGHT COLUMN: AI Assistant
-    # ════════════════════════════════════════════════════════════════════════
     with right_col:
         with st.container(border=True):
 
-            # ── Header row ───────────────────────────────────────────────────
-            _msg_count = len(st.session_state.get("genie_messages", []))
-            _loaded_hist_count = len(st.session_state.get("loaded_chat_history", [])) if st.session_state.get("show_loaded_chat_history", False) else 0
-            _effective_msg_count = _msg_count if _msg_count > 0 else (_loaded_hist_count * 2)
-            _hdr_left, _hdr_chats, _hdr_sum, _hdr_dl, _hdr_clr = st.columns(
-                [2.2, 0.9, 1.2, 1.1, 0.9], gap="small")
-            with _hdr_left:
+            # Header row with title and buttons
+            header_col, btn1, btn2, btn3, btn4 = st.columns([2, 1, 1, 1, 1], gap="small")
+            
+            with header_col:
                 st.markdown(
-                    '<div style="font-size:15px;font-weight:800;color:#0f172a;padding-top:6px;">AI Assistant</div>', unsafe_allow_html=True)
-            with _hdr_chats:
-                _chats_clicked = st.button(
-                    "Chats", use_container_width=True, help="Browse & resume previous conversations", key="btn_genie_chats")
-            with _hdr_sum:
-                _sum_clicked = st.button("Summarize", use_container_width=True, disabled=_effective_msg_count <
-                                         2, help="Compress conversation into a summary", key="btn_genie_summarize")
-            with _hdr_dl:
-                def _build_md_export():
-                    _msgs = st.session_state.get("genie_messages", [])
-                    _loaded = st.session_state.get("loaded_chat_history", [])
-                    _is_loaded = st.session_state.get("show_loaded_chat_history", False) and bool(_loaded)
-                    _label = f"Chat History - {st.session_state.get('loaded_chat_date', '')}" if _is_loaded else st.session_state.get(
-                        "genie_session_label", "Chat")
-                    _lines = [
-                        f"# OrderLens Genie — {_label}", "", f"*Exported {datetime.now().strftime('%Y-%m-%d %H:%M')}*", "", "---", ""]
-                    if _is_loaded:
-                        for _item in _loaded:
-                            _q = str(_item.get("question", "") or "").strip()
-                            _s = str(_item.get("summary", "") or "").strip()
-                            if _q:
-                                _lines.append("**You:** " + _q)
-                                _lines.append("")
-                            if _s:
-                                _lines.append("**AI Assistant:** " + _s)
-                                _lines.append("")
-                    else:
-                        for _m in _msgs:
-                            if not _m.get("content"):
-                                continue
-                            _pfx = "**You:** " if _m["role"] == "user" else "**Genie:** "
-                            _lines.append(_pfx + _m["content"])
-                            _lines.append("")
-                    return "\n".join(_lines)
-                st.download_button("Export MD", data=_build_md_export(),
-                                   file_name="genie_chat_" + datetime.now().strftime("%Y%m%d_%H%M") + ".md",
-                                   mime="text/markdown", use_container_width=True,
-                                   disabled=_effective_msg_count == 0, help="Download chat as Markdown", key="btn_genie_export")
-            with _hdr_clr:
-                _clr_clicked = st.button("Clear", use_container_width=True, disabled=_effective_msg_count ==
-                                         0, type="secondary", help="Clear messages & start fresh", key="btn_genie_clear")
-
-            # ── Handle: Chats panel toggle ────────────────────────────────────
-            if _chats_clicked:
-                _prev_show = st.session_state.get("show_chats_panel", False)
-                st.session_state["show_chats_panel"] = not _prev_show
-                if not _prev_show:
-                    st.session_state["_all_sessions_cache"] = _load_user_chat_dates()
-
-            if st.session_state.get("show_chats_panel", False):
-                _all_sess2 = st.session_state.get("_all_sessions_cache", [])
-                with st.container(border=True):
-                    st.markdown(
-                        "<div style='font-size:14px;font-weight:800;color:#1e40af;margin-bottom:12px;'> Previous Conversations</div>", unsafe_allow_html=True)
-                    if st.button("New Conversation", key="btn_panel_new", use_container_width=True, type="primary"):
-                        st.session_state.genie_messages = []
-                        st.session_state.analyst_response = None
-                        st.session_state.show_analysis = False
-                        st.session_state.selected_analysis = None
-                        st.session_state.last_custom_query = ""
-                        st.session_state.genie_session_id = str(uuid.uuid4())
-                        st.session_state.genie_session_label = "Chat on " + \
-                            datetime.now().strftime("%b %d %H:%M")
-                        st.session_state.chat_turn_index = 0
-                        st.session_state.restore_dismissed = True
-                        st.session_state.restore_offered = False
-                        st.session_state["show_loaded_chat_history"] = False
-                        st.session_state["loaded_chat_history"] = []
-                        st.session_state["loaded_chat_date"] = ""
-                        st.session_state["show_chats_panel"] = False
-                        st.rerun()
-                    st.markdown("<div style='height:6px'></div>",
-                                unsafe_allow_html=True)
-                    if not _all_sess2:
-                        st.info(
-                            "No previous conversations found in the last 7 days.")
-                    else:
-                        for _si3, _sess3 in enumerate(_all_sess2):
-                            _chat_date3 = str(_sess3.get("ChatDate", "")).strip()
-                            _nturns3 = int(_sess3.get("count", 0) or 0)
-                            _last_msg3 = str(_sess3.get("last_message_at", "") or "").strip()
-                            _age_str3 = ""
-                            try:
-                                if _last_msg3 and _last_msg3.lower() not in ("none", "nan"):
-                                    try:
-                                        _chat_dt3 = datetime.fromisoformat(_last_msg3)
-                                    except ValueError:
-                                        _chat_dt3 = datetime.strptime(_last_msg3[:19], "%Y-%m-%d %H:%M:%S")
-                                else:
-                                    _chat_dt3 = datetime.strptime(_chat_date3[:10], "%Y-%m-%d")
-                                _mins3 = int((datetime.now() - _chat_dt3).total_seconds() // 60)
-                                _hrs3 = _mins3 // 60
-                                if _mins3 < 1:
-                                    _age_str3 = "just now"
-                                elif _mins3 < 60:
-                                    _age_str3 = f"{_mins3}m ago"
-                                elif _hrs3 < 24:
-                                    _age_str3 = f"{_hrs3}h ago"
-                                elif _hrs3 < 48:
-                                    _age_str3 = "1 day ago"
-                                else:
-                                    _age_str3 = f"{_hrs3 // 24} days ago"
-                            except Exception:
-                                _age_str3 = ""
-                            _is_cur3 = (
-                                st.session_state.get("show_loaded_chat_history", False)
-                                and st.session_state.get("loaded_chat_date", "") == _chat_date3
+                    """
+                    <div style="font-size: 20px; font-weight: 800; color: #0F172A; padding-top: 8px;">AI Assistant</div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            
+            with btn1:
+                if st.button("Chats", use_container_width=True, key="btn_chats"):
+                    st.session_state.show_conversation_history = True
+                    st.rerun()
+            with btn2:
+                if st.button("Summarize", use_container_width=True, key="btn_summarize"):
+                    session_qs = st.session_state.get("genie_queries", [])
+                    today_str = datetime.now().strftime("%Y-%m-%d")
+                    db_qs = _load_queries_by_date(today_str)
+                    all_questions = []
+                    seen = set()
+                    for q in db_qs:
+                        txt = q.get("question", "").strip()
+                        if txt and txt not in seen:
+                            seen.add(txt)
+                            all_questions.append({"question": txt, "answer": q.get("full_answer") or q.get("summary", "")})
+                    for q in session_qs:
+                        txt = q.get("question", "").strip()
+                        if txt and txt not in seen:
+                            seen.add(txt)
+                            all_questions.append({"question": txt, "answer": q.get("summary", "")})
+                    if all_questions:
+                        with st.spinner("Generating session summary..."):
+                            qa_block = "\n\n".join(
+                                f"Q: {item['question']}\nA: {item['answer']}"
+                                for item in all_questions if item.get("question")
                             )
-                            _sl3, _sr3 = st.columns([5, 2], gap="small")
-                            with _sl3:
-                                _cur_tag3 = (
-                                    " <span style='background:#dcfce7;color:#15803d;border-radius:10px;padding:1px 8px;font-size:10px;font-weight:700;'>Active</span>") if _is_cur3 else ""
-                                _label3 = f"Chat on {_chat_date3}"
-                                _meta3 = f"{_nturns3} messages"
-                                if _age_str3:
-                                    _meta3 = f"{_meta3} &nbsp;·&nbsp; {_age_str3}"
-                                st.markdown(
-                                    f"<div style='background:{'#eff6ff' if _is_cur3 else '#f8fafc'};"
-                                    f"border:1px solid {'#bfdbfe' if _is_cur3 else '#e2e8f0'};"
-                                    f"border-radius:10px;padding:9px 12px;margin-bottom:4px;'>"
-                                    f"<div style='font-size:13px;font-weight:700;color:#0f172a;'>{html.escape(_label3)}{_cur_tag3}</div>"
-                                    f"<div style='font-size:11px;color:#64748b;margin-top:2px;'>{_meta3}</div></div>",
-                                    unsafe_allow_html=True,
-                                )
-                            with _sr3:
-                                if _is_cur3:
-                                    st.markdown(
-                                        "<div style='padding:10px 0;text-align:center;font-size:12px;color:#64748b;'>Current</div>", unsafe_allow_html=True)
-                                else:
-                                    if st.button("Resume", key=f"btn_panel_resume_{_si3}", use_container_width=True, type="primary"):
-                                        with st.spinner("Loading conversation..."):
-                                            _chat_queries3 = _load_queries_by_date(_chat_date3)
-                                        st.session_state["loaded_chat_date"] = _chat_date3
-                                        st.session_state["loaded_chat_history"] = _chat_queries3
-                                        st.session_state["show_loaded_chat_history"] = bool(_chat_queries3)
-                                        st.session_state.restore_dismissed = True
-                                        st.session_state["show_chats_panel"] = False
-                                        if not _chat_queries3:
-                                            st.warning(f"No chat history found for {_chat_date3}")
-                                        st.rerun()
-                        st.markdown("<div style='height:4px'></div>",
-                                    unsafe_allow_html=True)
-                        if st.button("Close", key="btn_panel_close", use_container_width=True, type="secondary"):
-                            st.session_state["show_chats_panel"] = False
-                            st.rerun()
+                            summary_prompt = f"""You are an AI analyst summarising a procurement analytics session.\n\nThe user asked the following questions today:\n{qa_block}\n\nGenerate a concise executive SESSION SUMMARY with these sections:\n1. **Session Overview** - What topics and data areas did the user explore? (2-3 sentences)\n2. **Key Findings** - The most important data insights surfaced. (3-5 bullet points)\n3. **Patterns & Themes** - Recurring themes, vendors, time periods, or anomalies. (2-3 sentences)\n4. **Suggested Next Steps** - Follow-up questions or actions that would add value. (2-3 bullet points)\n\nBe concise and factual. Output only the summary."""
+                            result = cortex_complete(summary_prompt, temperature=0.3)
+                            st.session_state["session_summary_text"] = (result or "").strip()
+                            st.session_state["show_session_summary"] = True
+                    else:
+                        st.info("No questions found for today's session to summarize.")
+            with btn3:
+                # Build AI-summarised MD; cache in session_state so it only regenerates once
+                if "export_md_content" not in st.session_state:
+                    chat_dates = _load_user_chat_dates()
+                    if chat_dates:
+                        md_lines = ["# Chat History — AI Summary\n"]
+                        for item in chat_dates:
+                            chat_date_text = item.get("ChatDate", "")
+                            freq = item.get("count", 0)
+                            md_lines.append(f"## {chat_date_text}  _(asked {freq} time{'s' if freq != 1 else ''})_\n")
+                            queries = _load_queries_by_date(chat_date_text)
+                            if queries:
+                                for idx, q in enumerate(queries, 1):
+                                    question = q.get("question", "").strip()
+                                    full_answer = q.get("full_answer", "").strip()
+                                    sql = q.get("sql", "").strip()
+                                    summary = q.get("summary", "").strip()
+                                    # Use stored summary if available, otherwise generate via AI
+                                    if not summary and (question or full_answer):
+                                        summary = generate_context_summary(question, full_answer, sql)
+                                    md_lines.append(f"### Q{idx}: {question}\n")
+                                    md_lines.append(f"{summary if summary else '_No summary available._'}\n")
+                            else:
+                                md_lines.append("_No query details found for this date._\n")
+                        st.session_state.export_md_content = "\n".join(md_lines)
+                    else:
+                        st.session_state.export_md_content = None
 
-            # ── Handle: Summarize ─────────────────────────────────────────────
-            if _sum_clicked:
+                if st.session_state.get("export_md_content"):
+                    st.download_button(
+                        label="Export MD",
+                        data=st.session_state.export_md_content,
+                        file_name="chat_history.md",
+                        mime="text/markdown",
+                        use_container_width=True,
+                        key="btn_export"
+                    )
+                else:
+                    if st.button("Export MD", use_container_width=True, key="btn_export_empty"):
+                        st.info("No chat history to export.")
+            with btn4:
+                if st.button("Clear", use_container_width=True, key="btn_clear"):
+                    st.session_state.show_analysis = False
+                    st.session_state.analyst_response = None
+                    st.session_state.show_conversation_history = False
+                    st.rerun()
 
-                try:
-                    with st.spinner("Summarizing conversation..."):
-                        sum_prompt = """Summarize this sales & operations analytics conversation in 4-5 bullet points. 
-                                    Keep key findings, dealer names, and important numbers:"""
-                        _tdf = cortex_complete(sum_prompt)
+            st.markdown("<div style='height: 20px;'></div>", unsafe_allow_html=True)
 
-                        _summary = _tdf if not _tdf.empty else "" or "Previous conversation summarized."
-                except Exception:
-                    _summary = "Previous conversation context retained."
-                st.session_state.genie_messages = [{
-                    "role": "assistant", "content": f"Conversation summary:\n{_summary}",
-                    "timestamp": pd.Timestamp.now(), "response": None,
-                }]
-                st.rerun()
+            # Session summary panel - full width, shown below the button row
+            if st.session_state.get("show_session_summary") and st.session_state.get("session_summary_text"):
+                import re as _re_sum
+                _sum_html = st.session_state["session_summary_text"].replace("\n", "<br/>")
+                _sum_html = _re_sum.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', _sum_html)
+                st.markdown(f"""
+                <div style="background:#f0f9ff;border-radius:12px;border-left:4px solid #0284c7;padding:20px 24px;margin-bottom:16px;">
+                    <div style="font-size:15px;font-weight:800;color:#0369a1;margin-bottom:12px;">Session Summary</div>
+                    <div style="font-size:13px;color:#1e293b;line-height:1.8;">{_sum_html}</div>
+                </div>
+                """, unsafe_allow_html=True)
+                if st.button("Close Summary", key="close_summary"):
+                    st.session_state["show_session_summary"] = False
+                    st.rerun()
 
-            # ── Handle: Clear ─────────────────────────────────────────────────
-            if _clr_clicked:
-                st.session_state.genie_messages = []
-                st.session_state.analyst_response = None
-                st.session_state.show_analysis = False
-                st.session_state.selected_analysis = None
-                st.session_state.last_custom_query = ""
-                st.session_state.genie_session_id = str(uuid.uuid4())
-                st.session_state.genie_session_label = "Chat on " + \
-                    datetime.now().strftime("%b %d %H:%M")
-                st.session_state.chat_turn_index = 0
-                st.session_state.restore_dismissed = True
-                st.session_state.restore_offered = False
-                st.session_state["show_loaded_chat_history"] = False
-                st.session_state["loaded_chat_history"] = []
-                st.session_state["loaded_chat_date"] = ""
-                st.session_state["_all_sessions_cache"] = []
-                for _k in list(st.session_state.keys()):
-                    if str(_k).startswith("_pres_") or str(_k).startswith("_pred_"):
-                        del st.session_state[_k]
-                st.rerun()
-
-            st.markdown("<div style='height:6px;'></div>",
-                        unsafe_allow_html=True)
-
-            # ════════════════════════════════════════════════════════════════
-            # SCROLLABLE CHAT AREA
-            # ════════════════════════════════════════════════════════════════
-            with st.container(height=320, border=True):
-                _all_messages = st.session_state.get("genie_messages", [])
-                _cp_ref = st.session_state.get("chat_persistence")
-                _loaded_chat = st.session_state.get("loaded_chat_history", [])
-                _loaded_date = st.session_state.get("loaded_chat_date", "")
-
-                # Session-restore picker (shown when chat is empty)
-                if (not _all_messages and not st.session_state.get("restore_dismissed")):
-                    if not st.session_state.get("restore_offered"):
-                        try:
-                            _sessions = _load_user_chat_dates()
-                        except Exception:
-                            _sessions = []
-                        st.session_state["_all_sessions_cache"] = _sessions
-                        st.session_state["restore_offered"] = True
-
-                _all_sessions_restore = st.session_state.get(
-                    "_all_sessions_cache", [])
-
-                if st.session_state.get("show_loaded_chat_history", False) and _loaded_chat:
-                    _bh1, _bh2 = st.columns([1, 5], gap="small")
-                    with _bh1:
-                        if st.button("← Back", key="btn_back_loaded_chat"):
+            # Display loaded chat history from a specific date - takes priority
+            if st.session_state.get("show_loaded_chat_history", False):
+                chat_date = st.session_state.get("loaded_chat_date", "")
+                chat_history = st.session_state.get("loaded_chat_history", [])
+                
+                if chat_history:
+                    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+                    # Header with back button
+                    col_back, col_title, col_spacer = st.columns([1, 4, 1])
+                    with col_back:
+                        if st.button("← Back", key="back_from_chat_history"):
                             st.session_state["show_loaded_chat_history"] = False
                             st.session_state["loaded_chat_history"] = []
                             st.session_state["loaded_chat_date"] = ""
                             st.rerun()
-                    with _bh2:
-                        st.markdown(
-                            f"<div style='font-size:15px;font-weight:800;color:#0f172a;padding-top:8px;'>Chat History - {html.escape(str(_loaded_date))}</div>",
-                            unsafe_allow_html=True,
-                        )
-                    st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-                    for _q_item in _loaded_chat:
-                        _question = str(_q_item.get("question", "") or "").strip()
-                        _summary = str(_q_item.get("summary", "") or "").strip()
-                        if _question:
-                            st.markdown(f"""
-                            <div class="g-user">
-                                <div class="g-user-inner">
-                                    <div class="g-user-lbl">You</div>
-                                    {html.escape(_question)}
-                                </div>
-                            </div>""", unsafe_allow_html=True)
-                        if _summary:
-                            st.markdown(f"""
-                            <div class="g-ai">
-                                <div class="g-ai-inner">
-                                    <div class="g-ai-lbl">AI Assistant</div>
-                                    {html.escape(_summary)}
-                                </div>
-                            </div>""", unsafe_allow_html=True)
-
-                elif not _all_messages and not st.session_state.get("show_loaded_chat_history", False):
-                    if not st.session_state.get("show_analysis"):
-                        st.markdown("""
-                        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:500px;text-align:center;">
-                            <div style="font-size:32px;margin-bottom:16px;color:#94a3b8;">&#x2022;</div>
-                            <div style="font-size:18px;font-weight:800;color:#1a1a1a;margin-bottom:8px;">Start a Conversation</div>
-                            <div style="font-size:14px;color:#64748b;max-width:400px;">Ask questions about your Sales &amp; Operations data, or select a quick analysis above.</div>
-                        </div>""", unsafe_allow_html=True)
-
-                # ── Render live message bubbles ───────────────────────────────
-                for _msg_idx, _msg in enumerate([] if st.session_state.get("show_loaded_chat_history", False) else _all_messages):
-                    _role = _msg.get("role", "user")
-                    _content = _msg.get("content", "") or ""
-                    _response = _msg.get("response")
-                    _cached = _msg.get("from_cache", False)
-
-                    if _role == "user":
+                    with col_title:
                         st.markdown(f"""
-                        <div class="g-user">
-                            <div class="g-user-inner">
-                                <div class="g-user-lbl">You</div>
-                                {html.escape(_content)}
-                            </div>
-                        </div>""", unsafe_allow_html=True)
-                    else:
-                        if _content:
-                            st.markdown(f"""
-                            <div class="g-ai">
-                                <div class="g-ai-inner">
-                                    <div class="g-ai-lbl">Genie</div>
-                                    {html.escape(_content)}
+                        <div style="font-size:18px;font-weight:800;color:#0F172A;">Chat History - {chat_date}</div>
+                        """, unsafe_allow_html=True)
+                    
+                    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+
+                    # Build full chat bubble HTML in one block
+                    chat_bubbles_html = '<div style="display:flex;flex-direction:column;gap:16px;padding:4px 0;">'
+                    for idx, query_item in enumerate(chat_history):
+                        question = query_item.get("question", "").strip()
+                        summary  = query_item.get("summary", "").strip()
+                        # User bubble - right aligned, blue
+                        if question:
+                            chat_bubbles_html += f'''<div style="display:flex;flex-direction:column;align-items:flex-end;">
+                                <div style="font-size:11px;font-weight:700;color:#64748B;margin-bottom:4px;margin-right:4px;">You</div>
+                                <div style="background:#3B5BDB;color:#fff;border-radius:18px 18px 4px 18px;
+                                            padding:12px 16px;max-width:80%;font-size:13px;font-weight:500;line-height:1.5;">
+                                    {question}
                                 </div>
-                            </div>""", unsafe_allow_html=True)
-                        # Older messages: only show SQL expander
-                        _is_latest = (_msg_idx == len(_all_messages) - 1)
-                        if _response and not _is_latest:
-                            _old_blocks = (_response.get("message", {}).get(
-                                "content", []) if isinstance(_response, dict) else [])
-                            for _ob in _old_blocks:
-                                if _ob.get("type") == "sql":
-                                    with st.expander("View SQL used", expanded=False):
-                                        st.code(
-                                            _ob.get("statement", ""), language="sql")
+                            </div>'''
+                        # AI bubble - left aligned, light grey
+                        if summary:
+                            chat_bubbles_html += f'''<div style="display:flex;flex-direction:column;align-items:flex-start;">
+                                <div style="font-size:11px;font-weight:700;color:#64748B;margin-bottom:4px;margin-left:4px;">AI Assistant</div>
+                                <div style="background:#F1F5F9;color:#1e293b;border-radius:18px 18px 18px 4px;
+                                            padding:12px 16px;max-width:85%;font-size:13px;line-height:1.6;">
+                                    {summary}
+                                </div>
+                            </div>'''
+                    chat_bubbles_html += '</div>'
+                    st.markdown(chat_bubbles_html, unsafe_allow_html=True)
+                    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
-                # ── Full result panel renders INSIDE the scroll container ──────
-                _active_response = st.session_state.get("analyst_response")
-                if not _active_response and _all_messages:
-                    for _lm in reversed(_all_messages):
-                        if _lm.get("role") == "assistant" and _lm.get("response"):
-                            _active_response = _lm["response"]
-                            break
+            # Show resume conversation section only when NOT viewing chat history
+            else:
+                # Blue background section
+                st.markdown(
+                    """
+                    <div style="background-color: #EEF4FF; border-radius: 12px; padding: 20px; margin-bottom: 20px;">
+                        <h2 style="font-size: 20px; font-weight: 800; color: #0F172A; margin: 0 0 8px 0;">Resume a previous conversation</h2>
+                        <p style="font-size: 14px; color: #475569; margin: 0;">View chats from your recent activity. Pick one to continue, or ask a new question.</p>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-                if _active_response and not isinstance(_active_response, bool):
-                    st.session_state.show_analysis = True
-                    st.session_state.analyst_response = _active_response
+                # Show conversation history or empty state
+                if st.session_state.get("show_conversation_history", True):
+                    # Returns list of {"query": ..., "count": ...}
+                    ChatDate = _load_user_chat_dates()
+
+                    if not ChatDate:
+                        st.info("No query history found for your account.")
+                    else:
+                        # Render each query as a card
+                        for i, item in enumerate(ChatDate[:]):  # Show up to 6 cards
+                            chat_date = item["ChatDate"]
+                            freq = item.get("count", 0)
+
+                            # Calculate how long ago this chat was
+                            # Prefer real timestamp (last_message_at) for accuracy;
+                            # fall back to ChatDate (midnight) if not available.
+                            try:
+                                _last_msg = item.get("last_message_at", "")
+                                if _last_msg and str(_last_msg) not in ("", "None", "nan"):
+                                    try:
+                                        _chat_dt = datetime.fromisoformat(str(_last_msg).strip())
+                                    except ValueError:
+                                        _chat_dt = datetime.strptime(str(_last_msg).strip()[:19], "%Y-%m-%d %H:%M:%S")
+                                else:
+                                    # Fallback: use ChatDate at midnight (less precise)
+                                    _chat_dt = datetime.strptime(str(chat_date).strip()[:10], "%Y-%m-%d")
+                                _now = datetime.now()
+                                _diff_minutes = int((_now - _chat_dt).total_seconds() // 60)
+                                _diff_hours = _diff_minutes // 60
+                                if _diff_minutes < 1:
+                                    _time_ago = "just now"
+                                elif _diff_minutes < 60:
+                                    _time_ago = f"{_diff_minutes}m ago"
+                                elif _diff_hours < 24:
+                                    _time_ago = f"{_diff_hours}h ago"
+                                elif _diff_hours < 48:
+                                    _time_ago = "1 day ago"
+                                else:
+                                    _diff_days = _diff_hours // 24
+                                    _time_ago = f"{_diff_days} days ago"
+                            except Exception:
+                                _time_ago = ""
+
+                            # Native Streamlit card - no raw HTML to avoid escaping issues
+                            _is_active = (
+                                st.session_state.get("show_loaded_chat_history", False)
+                                and st.session_state.get("loaded_chat_date") == chat_date
+                            )
+                            _msg_label = str(freq) + " message" + ("s" if freq != 1 else "") + ("  ·  " + _time_ago if _time_ago else "")
+                            _display_title = f"Chat on {chat_date}"
+                            card_col1, card_col2 = st.columns([4.4, 1.6], gap="small")
+                            with card_col1:
+                                _border_style = (
+                                    "border:2px solid #16a34a;border-radius:10px;padding:12px 16px;background:#f0fdf4;"
+                                    if _is_active else
+                                    "border:1px solid #E5E7EB;border-radius:10px;padding:12px 16px;background:#FFFFFF;"
+                                )
+                                if _is_active:
+                                    _active_badge = '<span style="background:#16a34a;color:#fff;border-radius:5px;padding:2px 8px;font-size:11px;font-weight:700;margin-left:8px;">Active</span>'
+                                    st.markdown(
+                                        f'<div style="{_border_style}">'
+                                        f'<div style="font-size:14px;font-weight:700;color:#0F172A;margin-bottom:4px;">{_display_title}{_active_badge}</div>'
+                                        f'<div style="font-size:12px;color:#6B7280;">{_msg_label}</div>'
+                                        f'</div>',
+                                        unsafe_allow_html=True
+                                    )
+                                else:
+                                    st.markdown(
+                                        f'<div style="{_border_style}">'
+                                        f'<div style="font-size:14px;font-weight:700;color:#0F172A;margin-bottom:4px;">{_display_title}</div>'
+                                        f'<div style="font-size:12px;color:#6B7280;">{_msg_label}</div>'
+                                        f'</div>',
+                                        unsafe_allow_html=True
+                                    )
+                            with card_col2:
+                                st.write("")
+                                if not _is_active:
+                                    if st.button("Resume", key=f"resume_query_{i}", use_container_width=True, type="primary"):
+                                        with st.spinner("Loading chat history..."):
+                                            chat_queries = _load_queries_by_date(chat_date)
+                                            if chat_queries:
+                                                st.session_state["loaded_chat_date"] = chat_date
+                                                st.session_state["loaded_chat_history"] = chat_queries
+                                                st.session_state["show_loaded_chat_history"] = True
+                                            else:
+                                                st.warning(f"No chat history found for {chat_date}")
+                                        st.rerun()
+                            st.write("")
+                else:
+                    # Empty state - Start a Conversation
+                    st.markdown(
+                        """
+                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; text-align: center;">
+                            <div style="width: 80px; height: 80px; background-color: #DBEAFE; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 20px;">
+                                <span style="font-size: 40px; color: #93C5FD;">+</span>
+                            </div>
+                            <h2 style="font-size: 20px; font-weight: 800; color: #0F172A; margin: 0 0 12px 0;">Start a Conversation</h2>
+                            <p style="font-size: 14px; color: #64748B; margin: 0; max-width: 300px;">Ask questions about your Sales and Operations data, or select a quick analysis above.</p>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+
+            st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
+
+            # Chat area - show when not viewing loaded chat history
+            if not st.session_state.get("show_loaded_chat_history", False) and st.session_state.show_analysis and st.session_state.analyst_response:
+                response = st.session_state.analyst_response
+                analysis_key = st.session_state.selected_analysis
+                a = QUICK_ANALYSES.get(analysis_key, {})
+
+                # Quick-analysis layout (screenshot-style): Key Insights, charts, Explore Further
+                if response.get("layout") == "quick":
+                    # Controls row: Back (left) + Save insight pinned to right
+                    c_back, c_spacer, c_save = st.columns([1, 5, 1])
+                    with c_back:
+                        if st.button("Reset", key="back_btn"):
+                            st.session_state.show_analysis = False
+                            st.session_state.analyst_response = None
+                            st.rerun()
+                    with c_save:
+                        display_title = (st.session_state.get("last_custom_query") or "Custom Query") if analysis_key == "custom" else a.get("title", "Analysis")
+                        question_text = (st.session_state.get("last_custom_query") or a.get("question") or "").strip()
+                        if question_text and st.button(" Save", key="btn_save_insight_quick"):
+                            _save_insight(question_text, display_title, analysis_type=analysis_key or "quick", page="genie")
+                    st.markdown("<div style='height:12px;'></div>", unsafe_allow_html=True)
+
+                    # Show the user's question at the top of the answer (not in the chat box)
+                    display_title_safe = html.escape(str(display_title))
+                    st.markdown(f"""
+                    <div style="margin-bottom:16px;">
+                        <div style="font-size:12px;font-weight:700;color:#64748b;margin-bottom:6px;">Your question</div>
+                        <div style="font-size:18px;font-weight:800;color:#1a1a1a;">{display_title_safe}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                    m = response.get("metrics") or {}
+                    if "total_ytd" in m:
+                        _ytd = abbr_currency(safe_number(m.get("total_ytd"), 0))
+                        mom_val = safe_number(m.get("mom_pct"), 0)
+                        qoq_val = safe_number(m.get("qoq_pct"), 0)
+                        _mom = _safe_pct_str(m.get("mom_pct"), 0)
+                        _qoq = _safe_pct_str(m.get("qoq_pct"), 0)
+                        _top5 = safe_int(m.get("top5_pct"), 0)
+                        # Color: increase green, decrease red, zero black
+                        def _delta_color(v):
+                            if v > 0: return "#059669"
+                            if v < 0: return "#dc2626"
+                            return "#0f172a"
+                        _mom_color = _delta_color(mom_val)
+                        _qoq_color = _delta_color(qoq_val)
+                        st.markdown(f"""
+                        <div style="background:linear-gradient(135deg,#e0f2fe 0%,#dbeafe 100%);
+                             border:1.5px solid #bae6fd;border-radius:14px;padding:20px;margin-bottom:20px;">
+                            <div style="font-size:15px;font-weight:800;color:#0f172a;margin-bottom:14px;"> Key Insights</div>
+                            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;">
+                                <div style="background:rgba(255,255,255,0.8);padding:12px;border-radius:10px;">
+                                    <div style="font-size:11px;color:#64748b;font-weight:700;">Total Spend (YTD)</div>
+                                    <div style="font-size:22px;font-weight:900;color:#0f172a;">{_ytd}</div>
+                                </div>
+                                <div style="background:rgba(255,255,255,0.8);padding:12px;border-radius:10px;">
+                                    <div style="font-size:11px;color:#64748b;font-weight:700;">MoM Change</div>
+                                    <div style="font-size:22px;font-weight:900;color:{_mom_color};">{_mom}</div>
+                                </div>
+                                <div style="background:rgba(255,255,255,0.8);padding:12px;border-radius:10px;">
+                                    <div style="font-size:11px;color:#64748b;font-weight:700;">Top 5 Vendors</div>
+                                    <div style="font-size:22px;font-weight:900;color:#0f172a;">{_top5}% <span style="font-size:12px;color:#64748b;">of total spend</span></div>
+                                </div>
+                                <div style="background:rgba(255,255,255,0.8);padding:12px;border-radius:10px;">
+                                    <div style="font-size:11px;color:#64748b;font-weight:700;">QoQ Change</div>
+                                    <div style="font-size:22px;font-weight:900;color:{_qoq_color};">{_qoq}</div>
+                                </div>
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        if response.get("anomaly"):
+                            st.markdown(f"""
+                            <div style="background:#fffbeb;border:1.5px solid #fde68a;border-radius:10px;
+                                 padding:14px 16px;margin-bottom:20px;display:flex;align-items:flex-start;gap:10px;">
+                                <span style="font-size:18px;">️</span>
+                                <div>
+                                    <div style="font-size:14px;font-weight:800;color:#0f172a;margin-bottom:4px;">Anomaly Detected</div>
+                                    <div style="font-size:13px;color:#475569;">{response['anomaly']}</div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    elif m.get("summary"):
+                        st.markdown(f"""
+                        <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:12px;
+                             padding:16px 20px;margin-bottom:16px;">
+                            <div style="font-size:14px;font-weight:700;color:#0f172a;">{m["summary"]}</div>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
                 if st.session_state.get("show_analysis") and st.session_state.get("analyst_response"):
                     _resp_inner = st.session_state.analyst_response
