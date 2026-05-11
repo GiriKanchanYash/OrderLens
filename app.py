@@ -5133,68 +5133,6 @@ elif st.session_state.current_page == "Genie":
                                 </div>
                             </div>""", unsafe_allow_html=True)
 
-                elif (not _all_messages and _all_sessions_restore and not st.session_state.get("restore_dismissed")):
-                    st.markdown("""
-                    <div class="resume-banner">
-                        <div style="font-size:16px;font-weight:800;color:#1e40af;margin-bottom:4px;"> Resume a previous conversation</div>
-                        <div style="font-size:13px;color:#374151;margin-bottom:14px;">You have chats from the last 7 days. Pick one to continue, or start fresh.</div>
-                    </div>""", unsafe_allow_html=True)
-                    for _si_r, _sess_r in enumerate(_all_sessions_restore):
-                        _chat_date_r = str(_sess_r.get("ChatDate", "")).strip()
-                        _tc_r = int(_sess_r.get("count", 0) or 0)
-                        _last_msg_r = str(_sess_r.get("last_message_at", "") or "").strip()
-                        _age_s_r = ""
-                        try:
-                            if _last_msg_r and _last_msg_r.lower() not in ("none", "nan"):
-                                try:
-                                    _chat_dt_r = datetime.fromisoformat(_last_msg_r)
-                                except ValueError:
-                                    _chat_dt_r = datetime.strptime(_last_msg_r[:19], "%Y-%m-%d %H:%M:%S")
-                            else:
-                                _chat_dt_r = datetime.strptime(_chat_date_r[:10], "%Y-%m-%d")
-                            _mins_r = int((datetime.now() - _chat_dt_r).total_seconds() // 60)
-                            _hrs_r = _mins_r // 60
-                            if _mins_r < 1:
-                                _age_s_r = "just now"
-                            elif _mins_r < 60:
-                                _age_s_r = f"{_mins_r}m ago"
-                            elif _hrs_r < 24:
-                                _age_s_r = f"{_hrs_r}h ago"
-                            elif _hrs_r < 48:
-                                _age_s_r = "1 day ago"
-                            else:
-                                _age_s_r = f"{_hrs_r // 24} days ago"
-                        except Exception:
-                            _age_s_r = ""
-                        _rcl, _rcr = st.columns([5, 2], gap="small")
-                        with _rcl:
-                            _label_r = f"Chat on {_chat_date_r}"
-                            _meta_r = f"{_tc_r} messages"
-                            if _age_s_r:
-                                _meta_r = f"{_meta_r} · {_age_s_r}"
-                            st.markdown(
-                                f'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:10px 14px;margin-bottom:6px;">'
-                                f'<div style="font-size:13px;font-weight:700;color:#0f172a;">{html.escape(_label_r)}</div>'
-                                f'<div style="font-size:11px;color:#64748b;margin-top:2px;">{_meta_r}</div></div>',
-                                unsafe_allow_html=True,
-                            )
-                        with _rcr:
-                            if st.button("Resume", key=f"btn_resume_r_{_si_r}", use_container_width=True, type="primary"):
-                                with st.spinner("Loading conversation..."):
-                                    _chat_queries_r = _load_queries_by_date(_chat_date_r)
-                                st.session_state["loaded_chat_date"] = _chat_date_r
-                                st.session_state["loaded_chat_history"] = _chat_queries_r
-                                st.session_state["show_loaded_chat_history"] = bool(_chat_queries_r)
-                                st.session_state.restore_dismissed = True
-                                if not _chat_queries_r:
-                                    st.warning(f"No chat history found for {_chat_date_r}")
-                                st.rerun()
-                    st.markdown("<div style='height:6px;'></div>",
-                                unsafe_allow_html=True)
-                    if st.button("Start a new conversation", key="btn_start_fresh", use_container_width=True, type="secondary"):
-                        st.session_state.restore_dismissed = True
-                        st.rerun()
-
                 elif not _all_messages and not st.session_state.get("show_loaded_chat_history", False):
                     if not st.session_state.get("show_analysis"):
                         st.markdown("""
@@ -5220,9 +5158,6 @@ elif st.session_state.current_page == "Genie":
                             </div>
                         </div>""", unsafe_allow_html=True)
                     else:
-                        if _cached:
-                            st.markdown(
-                                '<span class="cache-badge"> Cache hit — answered instantly</span>', unsafe_allow_html=True)
                         if _content:
                             st.markdown(f"""
                             <div class="g-ai">
