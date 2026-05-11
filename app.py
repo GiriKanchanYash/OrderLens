@@ -4773,14 +4773,14 @@ elif st.session_state.current_page == "Genie":
     # ════════════════════════════════════════════════════════════════════════
     with left_col:
         # Warnings (non-blocking)
-        if st.session_state.get("genie_history_error"):
-            st.warning(
-                f"Question history not saving: {st.session_state.genie_history_error}")
-        if st.session_state.get("_chat_persist_error"):
-            st.warning(
-                f"⚠️ Chat history: {st.session_state['_chat_persist_error']}")
-        if st.session_state.get("_cache_write_error"):
-            st.warning(f" Cache: {st.session_state['_cache_write_error']}")
+        # if st.session_state.get("genie_history_error"):
+        #     st.warning(
+        #         f"Question history not saving: {st.session_state.genie_history_error}")
+        # if st.session_state.get("_chat_persist_error"):
+        #     st.warning(
+        #         f"⚠️ Chat history: {st.session_state['_chat_persist_error']}")
+        # if st.session_state.get("_cache_write_error"):
+        #     st.warning(f" Cache: {st.session_state['_cache_write_error']}")
         if not _get_current_user_raw():
             _owner_role = _get_app_owner_role()
             _gs = f'GRANT READ SESSION ON ACCOUNT TO ROLE {_owner_role};' if _owner_role else "GRANT READ SESSION ON ACCOUNT TO ROLE <role>;"
