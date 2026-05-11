@@ -422,6 +422,10 @@ for _k, _v in _SS_DEFAULTS.items():
 if "saved_insights_open" not in st.session_state:
     st.session_state.saved_insights_open = False
 
+print("---- SESSION STATE DUMP ----")
+for k, v in st.session_state.items():
+    print(f"{k}: {v}")
+print("----------------------------")
 
 def load_clean_ui_light():
     st.markdown("""
@@ -1286,20 +1290,29 @@ def _resolve_user_identity() -> str:
         return "" if s in ("None", "nan", "null", "<NA>", "") else s
 
     # ── 2. Fabric SQL CURRENT_USER() ─────────────────────────────────────────
+    # ── 2. Fabric SQL — try SESSION_CONTEXT user_email first, fall back to SUSER_SNAME ──
     try:
         df = session.sql("""
-            SELECT COALESCE(
-               LTRIM(RTRIM(SUSER_SNAME())),
-                ''
-            ) AS SF_USER
+            SELECT
+                COALESCE(
+                    LTRIM(RTRIM(CAST(SESSION_CONTEXT(N'user_email') AS NVARCHAR(256)))),
+                    LTRIM(RTRIM(SUSER_SNAME())),
+                    ''
+                ) AS SF_USER
         """).to_pandas()
         if not df.empty and "SF_USER" in df.columns:
             val = _clean(df.at[0, "SF_USER"])
-            if val:
+            # Reject pure GUID identities like xxxxxxxx-xxxx-...@xxxxxxxx-xxxx-...
+            import re as _re
+            _guid_pattern = _re.compile(
+                r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+                r'(@[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?$',
+                _re.IGNORECASE
+            )
+            if val and not _guid_pattern.match(val):
                 return _cache(val)
     except Exception:
         pass
-
     # ── 3. Azure App Service Easy Auth header ────────────────────────────────
     # Azure injects X-MS-CLIENT-PRINCIPAL-NAME when App Service Authentication
     # is enabled (Azure AD / Entra ID login).  Streamlit exposes request headers
@@ -1355,8 +1368,24 @@ def _resolve_user_identity() -> str:
 
 
 def _get_current_user_raw() -> str:
+    print(f"Current user (raw): {_resolve_user_identity()}")
     return _resolve_user_identity()
     """Best-effort viewer identity (may be NULL depending on runtime)."""
+
+def _get_current_user_display() -> str:
+    """
+    Return a display-friendly version of the resolved user identity.
+    Uses _resolve_user_identity() so the same chain applies everywhere.
+    """
+    raw = _resolve_user_identity()
+    if not raw or raw == "UNKNOWN":
+        return "User"
+
+    name = raw.split("@")[0].split("\\")[-1].replace("host:", "")
+    # Replace dots/underscores/hyphens with spaces and title-case
+    name = name.replace(".", " ").replace("_", " ").replace("-", " ").title()
+    print(f"Current user (display): {name}")
+    return name or "User"
 
 
 def _get_app_owner_role() -> str:
@@ -1367,6 +1396,7 @@ def _load_user_chat_dates() -> list:
     """Fetches chat dates and GENIE query counts for the last 7 days."""
 
     try:
+        user = _get_current_user_display()
         current_user = _get_current_user_raw() or "UNKNOWN"
         user_esc = _sql_escape(current_user)
 
