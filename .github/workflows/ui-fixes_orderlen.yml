@@ -63,4 +63,4 @@ jobs:
         with:
           app-name: 'OrderLen'
           slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_188F4DD595F84F33A86C3D5A097514E6 }}
+          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_7B560D8E9C7D4811B4D05F29A5CBA41A }}
