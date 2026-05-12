@@ -422,10 +422,10 @@ for _k, _v in _SS_DEFAULTS.items():
 if "saved_insights_open" not in st.session_state:
     st.session_state.saved_insights_open = False
 
-print("---- SESSION STATE DUMP ----")
-for k, v in st.session_state.items():
-    print(f"{k}: {v}")
-print("----------------------------")
+# print("---- SESSION STATE DUMP ----")
+# for k, v in st.session_state.items():
+#     print(f"{k}: {v}")
+# print("----------------------------")
 
 def load_clean_ui_light():
     st.markdown("""
