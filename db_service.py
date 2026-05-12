@@ -99,7 +99,13 @@ class FabricDataFrame:
 
     def to_pandas(self) -> pd.DataFrame:
         conn = self._session.get_connection()
-        return pd.read_sql(self._query, conn)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(self._query)
+            columns = [col[0] for col in cursor.description]
+            return pd.DataFrame(cursor.fetchall(), columns=columns)
+        finally:
+            cursor.close()
 
 
 # ---------------------------------------------------------------------------
@@ -142,10 +148,15 @@ def run_df(sql: str) -> pd.DataFrame:
 
 
 def execute_query(sql: str, params: Optional[list] = None) -> pd.DataFrame:
-    """Parameterised Lakehouse SELECT."""
     try:
         conn = get_active_session().get_connection()
-        return pd.read_sql(sql, conn, params=params or [])
+        cursor = conn.cursor()
+        try:
+            cursor.execute(sql, params or [])
+            columns = [col[0] for col in cursor.description]
+            return pd.DataFrame(cursor.fetchall(), columns=columns)
+        finally:
+            cursor. Close() 
     except Exception as exc:
         raise RuntimeError(f"Lakehouse query failed: {exc}") from exc
 
@@ -173,11 +184,15 @@ def get_warehouse_connection() -> pyodbc.Connection:
 
 
 def run_warehouse_df(sql: str) -> pd.DataFrame:
-    """SELECT from the Warehouse."""
-
     try:
         conn = _get_warehouse_session().get_connection()
-        return pd.read_sql(sql, conn)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(sql)
+            columns = [col[0] for col in cursor.description]
+            return pd.DataFrame(cursor.fetchall(), columns=columns)
+        finally:
+            cursor.close()
     except Exception as exc:
         raise RuntimeError(f"Warehouse read failed: {exc}") from exc
 
