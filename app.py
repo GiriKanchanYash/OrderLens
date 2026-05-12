@@ -47,44 +47,70 @@ if not logger.handlers:
 
 
 # ---------- Dependencies Check ----------
-# try:
-#     import streamlit as st
-#     import pandas as pd
-#     import altair as alt
-# except ImportError as e:
-#     st.error(
-#         f"Missing dependency: {e}. Please install required packages: streamlit, pandas, altair, numpy")
-#     st.stop()
+try:
+    import streamlit as st
+    import pandas as pd
+    import altair as alt
+except ImportError as e:
+    st.error(
+        f"Missing dependency: {e}. Please install required packages: streamlit, pandas, altair, numpy")
+    st.stop()
 
 
 # Get DB session
-# AFTER — wrap in a function, call lazily:
-def get_sessions():
-    if "db_session" not in st.session_state:
-        st.session_state["db_session"] = get_active_session()
-        st.session_state["db_session_wh"] = _get_warehouse_session()
-    return st.session_state["db_session"], st.session_state["db_session_wh"]
+session = get_active_session()
+session_wh = _get_warehouse_session()
 
-# Replace lines 64-114 with this:
-def _run_startup_checks():
-    session, session_wh = get_sessions()
-    if "startup_db_check_done" not in st.session_state:
-        st.session_state["startup_db_check_done"] = True
-        try:
-            session.sql("SELECT 1 AS probe").collect()
-            if "warehouse_setup_done" not in st.session_state:
-                try:
-                    _setup_results = ensure_warehouse_tables()
-                    st.session_state["warehouse_setup_done"] = True
-                    _setup_errors = {k: v for k, v in _setup_results.items() if "error" in str(v).lower()}
-                    if _setup_errors:
-                        st.warning(f"Some warehouse tables could not be created: {_setup_errors}")
-                except Exception as _setup_err:
-                    st.warning(f"Warehouse setup warning (non-blocking): {_setup_err}")
-                    st.session_state["warehouse_setup_done"] = True
-        except Exception as e:
-            err_str = str(e)
-            st.error("Database connection failed.")
+if "startup_db_check_done" not in st.session_state:
+    st.session_state["startup_db_check_done"] = True
+
+    try:
+        # 🔌 DB connection check
+        session.sql("SELECT 1 AS probe").collect()
+
+        # 🏗 Warehouse setup (run once)
+        if "warehouse_setup_done" not in st.session_state:
+            try:
+                _setup_results = ensure_warehouse_tables()
+                st.session_state["warehouse_setup_done"] = True
+
+                _setup_errors = {
+                    k: v for k, v in _setup_results.items()
+                    if "error" in str(v).lower()
+                }
+
+                if _setup_errors:
+                    st.warning(
+                        f"Some warehouse tables could not be created: {_setup_errors}"
+                    )
+
+            except Exception as _setup_err:
+                st.warning(f"Warehouse setup warning (non-blocking): {_setup_err}")
+                st.session_state["warehouse_setup_done"] = True
+
+    except Exception as e:
+        err_str = str(e)
+
+        # ❌ Show DB error only when exception occurs
+        st.error("Database connection failed. Check the diagnostics below.")
+
+        if (
+            "Server is not found" in err_str
+            or "connection to ." in err_str
+            or "08001" in err_str
+        ):
+            st.markdown(
+                """
+                **Possible causes:**
+                - Database server is down
+                - Incorrect host or port
+                - Network/firewall blocking access
+                - Wrong connection string
+
+                Please verify your database configuration.
+                """
+            )
+        else:
             st.markdown(f"**Error details:** `{err_str}`")
 
 # Database configuration
@@ -396,10 +422,10 @@ for _k, _v in _SS_DEFAULTS.items():
 if "saved_insights_open" not in st.session_state:
     st.session_state.saved_insights_open = False
 
-# print("---- SESSION STATE DUMP ----")
-# for k, v in st.session_state.items():
-#     print(f"{k}: {v}")
-# print("----------------------------")
+print("---- SESSION STATE DUMP ----")
+for k, v in st.session_state.items():
+    print(f"{k}: {v}")
+print("----------------------------")
 
 def load_clean_ui_light():
     st.markdown("""
@@ -1209,14 +1235,12 @@ def apply_custom_theme_picker(default_color: str = "#FBF9F4", link_text: str = "
 # Initialize the background‑color picker once at the top level
 apply_custom_theme_picker(link_text="BG")
 load_clean_ui_light()
-_run_startup_checks()
 
 
 # Helper function to run queries
 
 
 def run_query(query):
-    session, _ = get_sessions()
     try:
         return session.sql(query).to_pandas()
     except Exception as e:
@@ -1268,7 +1292,6 @@ def _resolve_user_identity() -> str:
     # ── 2. Fabric SQL CURRENT_USER() ─────────────────────────────────────────
     # ── 2. Fabric SQL — try SESSION_CONTEXT user_email first, fall back to SUSER_SNAME ──
     try:
-        session, session_wh = get_sessions()
         df = session.sql("""
             SELECT
                 COALESCE(
@@ -2009,7 +2032,6 @@ def _cortex_complete_prescriptive_quick(vendors_df, question: str, metrics: dict
     if data_str:
         prompt += f"\nData:\n{data_str}"
     try:
-        session, session_wh = get_sessions()
         """
         result = session.sql(
             "SELECT SNOWFLAKE.CORTEX.COMPLETE(?, ?) AS RESPONSE",
@@ -2151,25 +2173,8 @@ def alt_bar(df, x, y, title=None, horizontal=False, color="#60A5FA", height=320)
             x=alt.X(y, type='quantitative', axis=alt.Axis(
                 grid=False, title=None, format="~s")),
             y=alt.Y(x, type='nominal', sort='-x',
-                    axis=alt.Axis(grid=False, title=None, labelLimit=150)),
+                    axis=alt.Axis(grid=False, title=None)),
             tooltip=[x, alt.Tooltip(y, title="Value", format="~s")]
-        )
-        bar = base.mark_bar(
-            color=color,
-            cornerRadiusTopRight=4,
-            cornerRadiusBottomRight=4
-        )
-        text = alt.Chart(data).mark_text(
-            align='left',
-            baseline='middle',
-            dx=6,
-            color='#374151',
-            fontSize=11,
-            clip=False
-        ).encode(
-            x=alt.X(y, type='quantitative'),
-            y=alt.Y(x, type='nominal', sort='-x'),
-            text=alt.Text(y, format='~s')
         )
     else:
         base = alt.Chart(data).encode(
@@ -2178,8 +2183,16 @@ def alt_bar(df, x, y, title=None, horizontal=False, color="#60A5FA", height=320)
                 grid=False, title=None, format="~s")),
             tooltip=[x, alt.Tooltip(y, title="Value", format="~s")]
         )
-        bar = base.mark_bar(color=color, cornerRadiusTopLeft=4,
-                            cornerRadiusTopRight=4)
+    bar = base.mark_bar(color=color, cornerRadiusTopLeft=4,
+                        cornerRadiusTopRight=4)
+    if horizontal:
+        text = base.mark_text(
+            align='left',
+            baseline='middle',
+            dx=4,
+            color='#111827'
+        ).encode(text=alt.Text(y, format='~s'))
+    else:
         text = base.mark_text(
             align='center',
             baseline='bottom',
