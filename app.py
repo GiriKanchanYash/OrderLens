@@ -11,14 +11,14 @@ from typing import Optional, Dict, List, Any
 from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
 from config import Config
+from llm_service_full import generate_sql, cortex_complete
+from db_service import get_active_session, _get_warehouse_session, run_df, run_warehouse_df, run_warehouse_non_query
 import re
 import html
 import uuid
 import sys
 import os
 import hashlib
-from llm_service_full import generate_sql, cortex_complete
-from db_service import get_active_session, _get_warehouse_session, run_df, run_warehouse_df, run_warehouse_non_query
 from genie_middleware import (
     set_log_context,
     log_event,
@@ -44,98 +44,74 @@ if not logger.handlers:
 
 
 # from warehouse_setup import ensure_warehouse_tables
-# ── DB SESSION: lazy-initialised to avoid "SessionInfo not initialized" on Azure ──
-# Module-level placeholders — actual objects are created inside _init_db_session()
-# which is called at runtime (inside Streamlit's execution context), not at import time.
-session = None
-session_wh = None
 
 
-def _init_db_session():
-    """
-    Initialise DB sessions and run one-time warehouse setup.
-
-    Safe to call on every Streamlit rerun — guarded by st.session_state so the
-    heavy work only happens once per browser session.  Moving this logic out of
-    module scope fixes the "Tried to use SessionInfo before it was initialized"
-    error that surfaces when deploying to Azure Web App (or any environment where
-    the module is imported before Streamlit's runtime is fully ready).
-    """
-    global session, session_wh
-
-    # Resolve sessions only once per process lifetime (they are module globals).
-    if session is None:
-        try:
-            session = get_active_session()
-        except Exception as _e:
-            logger.warning(f"get_active_session() failed: {_e}")
-
-    if session_wh is None:
-        try:
-            session_wh = _get_warehouse_session()
-        except Exception as _e:
-            logger.warning(f"_get_warehouse_session() failed: {_e}")
-
-    # Run DB probe + warehouse setup exactly once per Streamlit session.
-    if "startup_db_check_done" not in st.session_state:
-        st.session_state["startup_db_check_done"] = True
-
-        try:
-            # 🔌 DB connection check
-            if session is not None:
-                session.sql("SELECT 1 AS probe").collect()
-
-            # 🏗 Warehouse setup (run once)
-            if "warehouse_setup_done" not in st.session_state:
-                try:
-                    _setup_results = ensure_warehouse_tables()
-                    st.session_state["warehouse_setup_done"] = True
-
-                    _setup_errors = {
-                        k: v for k, v in _setup_results.items()
-                        if "error" in str(v).lower()
-                    }
-
-                    if _setup_errors:
-                        st.warning(
-                            f"Some warehouse tables could not be created: {_setup_errors}"
-                        )
-
-                except Exception as _setup_err:
-                    st.warning(f"Warehouse setup warning (non-blocking): {_setup_err}")
-                    st.session_state["warehouse_setup_done"] = True
-
-        except Exception as e:
-            err_str = str(e)
-
-            # ❌ Show DB error only when exception occurs
-            st.error("Database connection failed. Check the diagnostics below.")
-
-            if (
-                "Server is not found" in err_str
-                or "connection to ." in err_str
-                or "08001" in err_str
-            ):
-                st.markdown(
-                    """
-                    **Possible causes:**
-                    - Database server is down
-                    - Incorrect host or port
-                    - Network/firewall blocking access
-                    - Wrong connection string
-
-                    Please verify your database configuration.
-                    """
-                )
-            else:
-                st.markdown(f"**Error details:** `{err_str}`")
+# ---------- Dependencies Check ----------
+try:
+    import streamlit as st
+    import pandas as pd
+    import altair as alt
+except ImportError as e:
+    st.error(
+        f"Missing dependency: {e}. Please install required packages: streamlit, pandas, altair, numpy")
+    st.stop()
 
 
-# Call immediately — this is safe because by the time any top-level Streamlit
-# code runs (st.set_page_config, st.markdown, etc.) the session IS initialised.
-# If for any reason this is still too early, move the call to the top of your
-# main() / page-render function instead.
-_init_db_session()
+# Get DB session
+session = get_active_session()
+session_wh = _get_warehouse_session()
+
+if "startup_db_check_done" not in st.session_state:
+    st.session_state["startup_db_check_done"] = True
+
+    try:
+        # 🔌 DB connection check
+        session.sql("SELECT 1 AS probe").collect()
+
+        # 🏗 Warehouse setup (run once)
+        if "warehouse_setup_done" not in st.session_state:
+            try:
+                _setup_results = ensure_warehouse_tables()
+                st.session_state["warehouse_setup_done"] = True
+
+                _setup_errors = {
+                    k: v for k, v in _setup_results.items()
+                    if "error" in str(v).lower()
+                }
+
+                if _setup_errors:
+                    st.warning(
+                        f"Some warehouse tables could not be created: {_setup_errors}"
+                    )
+
+            except Exception as _setup_err:
+                st.warning(f"Warehouse setup warning (non-blocking): {_setup_err}")
+                st.session_state["warehouse_setup_done"] = True
+
+    except Exception as e:
+        err_str = str(e)
+
+        # ❌ Show DB error only when exception occurs
+        st.error("Database connection failed. Check the diagnostics below.")
+
+        if (
+            "Server is not found" in err_str
+            or "connection to ." in err_str
+            or "08001" in err_str
+        ):
+            st.markdown(
+                """
+                **Possible causes:**
+                - Database server is down
+                - Incorrect host or port
+                - Network/firewall blocking access
+                - Wrong connection string
+
+                Please verify your database configuration.
+                """
+            )
+        else:
+            st.markdown(f"**Error details:** `{err_str}`")
 
 # Database configuration
 FILE = "schema_model.yaml"
@@ -1276,12 +1252,8 @@ def run_query(query):
 
 
 # Auto-suspend idle session (req 14)
-# Wrapped in try/except so that an uninitialised SessionInfo on Azure Web App
-# does not crash the entire module at import time.
-try:
-    inject_idle_timer()
-except Exception as _idle_err:
-    logger.warning(f"inject_idle_timer() skipped (SessionInfo not ready): {_idle_err}")
+# scripts/ is on sys.path (added at top of file) so this is a plain module import
+inject_idle_timer()
 
 
 def _sql_escape(s: str) -> str:
