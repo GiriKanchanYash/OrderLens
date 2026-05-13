@@ -13,7 +13,6 @@ Enhancements over the original:
 
 from __future__ import annotations
 import hashlib
-# import json
 import logging
 from typing import Optional
 import time
@@ -29,7 +28,6 @@ def _safe_log_event(event_type: str, payload: dict) -> None:
     """Avoid circular imports by importing Genie logging lazily."""
     try:
         from genie_middleware import log_event
-
         log_event(event_type, payload)
     except Exception:
         pass
@@ -50,7 +48,6 @@ class FabricSession:
         self._connection_string = connection_string or Config.get_connection_string()
         self._connection: pyodbc.Connection | None = None
 
-    # ------------------------------------------------------------------
     def _connect(self) -> pyodbc.Connection:
         return pyodbc.connect(self._connection_string)
 
@@ -68,7 +65,6 @@ class FabricSession:
             self._connection = None
         return False
 
-    # ------------------------------------------------------------------
     def sql(self, query: str) -> "FabricDataFrame":
         return FabricDataFrame(query, self)
 
@@ -119,8 +115,7 @@ def get_active_session() -> FabricSession:
 
 
 def _get_warehouse_session() -> FabricSession:
-    """ Return the module-level Warehouse session (read + write)."""
-
+    """Return the module-level Warehouse session (read + write)."""
     global _warehouse_session
     if _warehouse_session is None:
         _warehouse_session = FabricSession(
@@ -131,7 +126,6 @@ def _get_warehouse_session() -> FabricSession:
 # ---------------------------------------------------------------------------
 # Public query helpers - Lakehouse
 # ---------------------------------------------------------------------------
-
 
 def run_df(sql: str) -> pd.DataFrame:
     """Execute SQL against the Lakehouse and return a DataFrame."""
@@ -174,7 +168,6 @@ def get_warehouse_connection() -> pyodbc.Connection:
 
 def run_warehouse_df(sql: str) -> pd.DataFrame:
     """SELECT from the Warehouse."""
-
     try:
         conn = _get_warehouse_session().get_connection()
         return pd.read_sql(sql, conn)
@@ -184,7 +177,6 @@ def run_warehouse_df(sql: str) -> pd.DataFrame:
 
 def run_warehouse_non_query(sql: str, params: Optional[list] = None) -> int:
     """INSERT / UPDATE / DELETE against the Warehouse."""
-
     try:
         conn = _get_warehouse_session().get_connection()
         cursor = conn.cursor()
@@ -203,17 +195,31 @@ def run_warehouse_non_query(sql: str, params: Optional[list] = None) -> int:
 # ---------------------------------------------------------------------------
 # Query result cache (req 3, 8)
 #
-# The cache table (dbo.QUERY_RESULT_CACHE) is checked BEFORE every AI call
-# and every heavy analytical query.  If a matching row is found within TTL,
-# the cached JSON payload is returned directly.
+# FIX: _CACHE_TABLE was previously a module-level constant evaluated at import
+# time. On Azure Web App, Config values (read from env vars / Key Vault) may
+# not be available during module import, causing a crash before Streamlit's
+# SessionInfo is initialised.  It is now a lazy property resolved on first use.
 # ---------------------------------------------------------------------------
 
-_CACHE_TABLE = f"[{Config.FABRIC_ORDERLENS_WAREHOUSE_DATABASE}].[{Config.DEFAULT_SCHEMA}].[{Config.CACHE_TABLE_NAME}]"
+_cache_table: str | None = None  # resolved lazily on first cache call
+
+
+def _get_cache_table() -> str:
+    """Return the fully-qualified cache table name, resolved lazily."""
+    global _cache_table
+    if _cache_table is None:
+        _cache_table = (
+            f"[{Config.FABRIC_ORDERLENS_WAREHOUSE_DATABASE}]"
+            f".[{Config.DEFAULT_SCHEMA}]"
+            f".[{Config.CACHE_TABLE_NAME}]"
+        )
+    return _cache_table
 
 
 def _cache_key(question: str) -> str:
     """Deterministic 64-char hex key for a natural-language question."""
     return hashlib.sha256(question.strip().lower().encode()).hexdigest()
+
 
 def cache_get(question: str) -> Optional[dict]:
     """
@@ -231,6 +237,7 @@ def cache_get(question: str) -> Optional[dict]:
 
     start_time = time.time()
     key = _cache_key(question)
+    cache_table = _get_cache_table()  # lazy — safe on Azure
 
     try:
         df = run_warehouse_df(
@@ -238,14 +245,13 @@ def cache_get(question: str) -> Optional[dict]:
             SELECT GENERATED_SQL,
                    RESULT_JSON,
                    ROW_COUNT
-            FROM   {_CACHE_TABLE}
+            FROM   {cache_table}
             WHERE  CACHE_KEY = '{key}'
               AND  EXPIRES_AT > FORMAT(GETDATE(), 'yyyy-MM-dd HH:mm:ss')
             """
         )
 
         if df.empty:
-            # 🔹 Log cache miss
             _safe_log_event(
                 "CACHE_MISS",
                 {
@@ -260,7 +266,7 @@ def cache_get(question: str) -> Optional[dict]:
         try:
             run_warehouse_non_query(
                 f"""
-                UPDATE {_CACHE_TABLE}
+                UPDATE {cache_table}
                 SET    HIT_COUNT = HIT_COUNT + 1
                 WHERE  CACHE_KEY = '{key}'
                 """
@@ -270,7 +276,6 @@ def cache_get(question: str) -> Optional[dict]:
 
         row = df.iloc[0]
 
-        # Fabric Warehouse returns column names in uppercase
         def _get(r, *names):
             for name in names:
                 value = r.get(name)
@@ -286,7 +291,6 @@ def cache_get(question: str) -> Optional[dict]:
 
         duration = round(time.time() - start_time, 3)
 
-        # 🔹 Log cache hit
         _safe_log_event(
             "CACHE_HIT",
             {
@@ -303,7 +307,6 @@ def cache_get(question: str) -> Optional[dict]:
     except Exception as exc:
         duration = round(time.time() - start_time, 3)
 
-        # 🔹 Log cache error
         _safe_log_event(
             "CACHE_ERROR",
             {
@@ -334,6 +337,7 @@ def cache_set(question: str, sql: str, result_df: pd.DataFrame) -> None:
     q_esc = question.replace("'", "''")[:2000]
     sql_esc = sql.replace("'", "''")
     ttl = Config.CACHE_TTL_SECONDS
+    cache_table = _get_cache_table()  # lazy — safe on Azure
 
     try:
         result_json = result_df.to_json(orient="records", date_format="iso")
@@ -343,9 +347,8 @@ def cache_set(question: str, sql: str, result_df: pd.DataFrame) -> None:
 
     nrows = len(result_df)
     try:
-        # Try UPDATE first
         rows_updated = run_warehouse_non_query(f"""
-            UPDATE {_CACHE_TABLE}
+            UPDATE {cache_table}
             SET    GENERATED_SQL = '{sql_esc}',
                    RESULT_JSON   = '{result_json}',
                    ROW_COUNT     = {nrows},
@@ -357,10 +360,8 @@ def cache_set(question: str, sql: str, result_df: pd.DataFrame) -> None:
             WHERE  CACHE_KEY = '{key}'
         """)
         if rows_updated == 0:
-            # No existing row - INSERT with all values explicit (no DEFAULT)
-            # run_warehouse_non_query(f"""
             run_warehouse_non_query(f"""
-                INSERT INTO {_CACHE_TABLE}
+                INSERT INTO {cache_table}
                     (CACHE_KEY, QUESTION_HASH, QUESTION_TEXT, GENERATED_SQL,
                      RESULT_JSON, ROW_COUNT, CREATED_AT, EXPIRES_AT, HIT_COUNT)
                 VALUES (
@@ -379,10 +380,10 @@ def cache_set(question: str, sql: str, result_df: pd.DataFrame) -> None:
 def cache_invalidate(question: str) -> None:
     """Delete a specific question from the cache."""
     key = _cache_key(question)
+    cache_table = _get_cache_table()
     try:
-        # run_warehouse_non_query(
         run_warehouse_non_query(
-            f"DELETE FROM {_CACHE_TABLE} WHERE cache_key = '{key}'"
+            f"DELETE FROM {cache_table} WHERE cache_key = '{key}'"
         )
     except Exception:
         pass
@@ -390,10 +391,10 @@ def cache_invalidate(question: str) -> None:
 
 def cache_purge_expired() -> int:
     """Delete all expired entries; returns number of rows removed."""
+    cache_table = _get_cache_table()
     try:
         return run_warehouse_non_query(
-
-            f"DELETE FROM {_CACHE_TABLE} WHERE EXPIRES_AT <= FORMAT(GETDATE(), 'yyyy-MM-dd HH:mm:ss')"
+            f"DELETE FROM {cache_table} WHERE EXPIRES_AT <= FORMAT(GETDATE(), 'yyyy-MM-dd HH:mm:ss')"
         )
     except Exception:
         return 0
@@ -489,8 +490,6 @@ def test_connection() -> bool:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     print("Testing Lakehouse connection...")
-    # print(Config.get_connection_string())
-    # print(Config.FABRIC_ORDERLENS_DATABASE)
     if test_connection():
         print("Connection successful.")
         df = run_df(
