@@ -6441,3 +6441,4 @@ elif st.session_state.current_page == "Forecast":
                 st.altair_chart(chart, use_container_width=True)
             else:
                 st.info("No revenue share data available")
+#end of the code
