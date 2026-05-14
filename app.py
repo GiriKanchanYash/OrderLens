@@ -414,7 +414,10 @@ _SS_DEFAULTS = {
     "yaml_sync_result":    None,
     # Expanders
 
-    "saved_insights_open": False
+    "saved_insights_open": False,
+    "active_agent":  None,   # None | "smart_fulfillment"
+    "agent_ran":     False,
+    "agent_params":  {},
 }
 for _k, _v in _SS_DEFAULTS.items():
     if _k not in st.session_state:
@@ -4925,7 +4928,7 @@ elif st.session_state.current_page == "Genie":
                     st.session_state.show_conversation_history = True
                     st.rerun()
             with btn2:
-                if st.button("Summarize", use_container_width=True, key="btn_summarize"):
+                if st.button("Sumarize", use_container_width=True, key="btn_summarize"):
                     session_qs = st.session_state.get("genie_queries", [])
                     today_str = datetime.now().strftime("%Y-%m-%d")
                     db_qs = _load_queries_by_date(today_str)
@@ -5681,6 +5684,16 @@ elif st.session_state.current_page == "AI Agents":
       box-shadow:0 2px 8px rgba(2,8,23,.04);
       display:flex;
       flex-direction:column;
+      cursor:pointer;
+    }
+    .ag-active-banner {
+      border-radius:12px;
+      padding:20px 24px;
+      margin-bottom:20px;
+      color:#fff;
+      display:flex;
+      align-items:center;
+      gap:14px;
     }
     .ai-icon{
       width:38px;height:38px;border-radius:10px;
@@ -5759,9 +5772,465 @@ elif st.session_state.current_page == "AI Agents":
           </p>
         </div>
         """, unsafe_allow_html=True)
-        st.button("Launch Smart Fulfillment Agent",
-                  use_container_width=True, key="btn_launch_smart")
+        if st.button("Launch Smart Fulfillment Agent",
+                     use_container_width=True, key="btn_launch_smart"):
+            st.session_state.active_agent = "smart_fulfillment"
+            st.session_state.agent_ran    = False
+            st.rerun()
 
+    # ── Smart Fulfillment Agent panel ──────────────────────────────────────
+    if st.session_state.get("active_agent") == "smart_fulfillment":
+
+        col_hd3, col_back3 = st.columns([5, 1])
+        with col_back3:
+            if st.button("✕ Close Agent", key="close_sf", type="secondary",
+                         use_container_width=True):
+                st.session_state.active_agent = None
+                st.session_state.agent_ran    = False
+                st.rerun()
+
+        st.markdown("""
+        <div class="ag-active-banner" style="background:linear-gradient(135deg,#0891b2,#0f766e);">
+            <div style="font-size:32px;">🚚</div>
+            <div>
+                <div style="font-size:18px;font-weight:900;">Smart Fulfillment Agent</div>
+                <div style="font-size:13px;opacity:.9;">
+                    Routes any order to the optimal fulfillment node — fastest delivery
+                    or lowest cost — with live stock check across all warehouses,
+                    dark stores and retail outlets.
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── STEP 0: Verify fulfillment tables exist ────────────────────────────
+        @st.cache_data(ttl=120)
+        def _sf_tables_exist():
+            try:
+                chk = run_query(f"""
+                                SELECT COUNT(*) AS CNT
+                        FROM INFORMATION_SCHEMA.TABLES
+                        WHERE TABLE_SCHEMA = 'RAW_VAULT'
+                        AND TABLE_NAME IN (
+                            'fulfillment_nodes',
+                            'inventory_by_location',
+                            'shipping_cost_matrix'
+                        )
+                """)
+                return int(chk["CNT"].iloc[0]) == 3 if not chk.empty else False
+            except Exception:
+                return False
+
+        @st.cache_data(ttl=60)
+        def _sf_load_nodes():
+            return run_query(f"""
+                SELECT WAREHOUSE_ID, WAREHOUSE_NAME, NODE_TYPE,
+                CITY, REGION, LAT, LON, CONTACT_EMAIL
+                FROM OrderLens.RAW_VAULT.fulfillment_nodes
+                WHERE IS_ACTIVE = 1
+                ORDER BY NODE_TYPE, CITY;
+            """)
+
+        @st.cache_data(ttl=60)
+        def _sf_load_products():
+            return run_query(f"""
+                SELECT DISTINCT PRODUCT_NAME
+                FROM OrderLens.RAW_VAULT.inventory_by_location
+                WHERE IS_ACTIVE = 1
+                ORDER BY PRODUCT_NAME
+            """)
+
+        @st.cache_data(ttl=60)
+        def _sf_load_regions():
+            return run_query(f"""
+                SELECT DISTINCT TO_REGION AS REGION
+                FROM OrderLens.RAW_VAULT.shipping_cost_matrix
+                WHERE IS_ACTIVE = 1
+                ORDER BY TO_REGION
+            """)
+
+        if not _sf_tables_exist():
+            st.error(
+                "⚠️  Smart Fulfillment tables not found. "
+                "Please run **STEP1**, **STEP2** and **STEP3** SQL scripts first "
+                "in your Fabric workspace to create the required tables and views.",
+                icon="🚨"
+            )
+            st.markdown("""
+            <div style="background:#fff7ed;border:1.5px solid #fed7aa;border-radius:12px;padding:18px 20px;margin-top:12px;">
+            <div style="font-weight:800;font-size:14px;color:#c2410c;margin-bottom:10px;">📋 What you need to run first:</div>
+            <div style="font-size:13px;color:#374151;line-height:2;">
+            <b>Step 1</b> → STEP1_CREATE_RAW_TABLES.sql — creates the 3 raw source tables<br/>
+            <b>Step 2</b> → STEP2_INSERT_SAMPLE_DATA.sql — loads sample fulfillment data<br/>
+            <b>Step 3</b> → STEP3_CREATE_VIEWS.sql — creates the views the agent queries
+            </div>
+            </div>
+            """, unsafe_allow_html=True)
+            st.stop()
+
+        # ── Network overview ───────────────────────────────────────────────────
+        st.markdown('<div class="step-pill">⚙ Step 1 — Fulfillment Network Overview</div>',
+                    unsafe_allow_html=True)
+
+        nodes_df    = _sf_load_nodes()
+        products_df = _sf_load_products()
+        regions_df  = _sf_load_regions()
+
+        if nodes_df.empty:
+            st.warning("No active fulfillment nodes found. Check FULFILLMENT_NODES table.")
+            st.stop()
+
+        n_warehouses  = int((nodes_df["NODE_TYPE"] == "WAREHOUSE").sum())
+        n_dark_stores = int((nodes_df["NODE_TYPE"] == "DARK_STORE").sum())
+        n_retail      = int((nodes_df["NODE_TYPE"] == "RETAIL").sum())
+        n_products    = len(products_df)
+        n_regions     = len(regions_df)
+
+        nc1, nc2, nc3, nc4, nc5 = st.columns(5)
+        for col, lbl, val, bg, fg in [
+            (nc1, "Warehouses",   n_warehouses,  "#dbeafe", "#1e40af"),
+            (nc2, "Dark Stores",  n_dark_stores, "#fef3c7", "#d97706"),
+            (nc3, "Retail Nodes", n_retail,      "#d1fae5", "#059669"),
+            (nc4, "Products",     n_products,    "#f3e8ff", "#7c3aed"),
+            (nc5, "Regions",      n_regions,     "#e0f2fe", "#0284c7"),
+        ]:
+            col.markdown(
+                f'<div style="background:{bg};border-radius:10px;padding:14px;text-align:center;">'
+                f'<div style="font-size:26px;font-weight:900;color:{fg};">{val}</div>'
+                f'<div style="font-size:11px;font-weight:700;color:{fg};">{lbl}</div>'
+                f'</div>', unsafe_allow_html=True
+            )
+
+        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+        with st.expander("📍 View All Fulfillment Nodes", expanded=False):
+            disp_nodes = nodes_df.copy()
+            disp_nodes["LAT"] = disp_nodes["LAT"].apply(lambda v: f"{float(v):.4f}")
+            disp_nodes["LON"] = disp_nodes["LON"].apply(lambda v: f"{float(v):.4f}")
+            disp_nodes.columns = ["Node ID","Name","Type","City","Region","Lat","Lon","Contact"]
+            st.dataframe(disp_nodes, use_container_width=True, hide_index=True)
+
+        # ── Parameters ────────────────────────────────────────────────────────
+        st.markdown("#### Routing Parameters")
+        sf1, sf2, sf3 = st.columns(3, gap="medium")
+
+        product_list = sorted(products_df["PRODUCT_NAME"].tolist()) if not products_df.empty else []
+        region_list  = sorted(regions_df["REGION"].tolist())        if not regions_df.empty else []
+
+        with sf1:
+            with st.container(border=True):
+                st.markdown('<div class="param-lbl">Product to Route</div>', unsafe_allow_html=True)
+                sf_product = st.selectbox("Product", product_list,
+                                          key="sf_product", label_visibility="collapsed")
+                st.caption("Select the product you want to fulfill.")
+
+        with sf2:
+            with st.container(border=True):
+                st.markdown('<div class="param-lbl">Delivery Region</div>', unsafe_allow_html=True)
+                sf_region = st.selectbox("Region", region_list,
+                                         key="sf_region", label_visibility="collapsed")
+                st.caption("Where the order needs to be delivered.")
+
+        with sf3:
+            with st.container(border=True):
+                st.markdown('<div class="param-lbl">Priority Mode</div>', unsafe_allow_html=True)
+                sf_mode = st.radio(
+                    "Mode", ["⚡ Speed — Fastest delivery", "💰 Cost — Lowest total cost"],
+                    key="sf_mode", label_visibility="collapsed"
+                )
+                is_speed_mode = sf_mode.startswith("⚡")
+                st.caption(
+                    "Speed: shortest delivery days. Cost: lowest shipping cost."
+                    if not is_speed_mode else
+                    "Speed: closest node with stock, fastest carrier."
+                )
+
+        st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+        if st.button("Run Smart Fulfillment Agent", key="run_sf",
+                     type="primary", use_container_width=True):
+            st.session_state.agent_ran    = True
+            st.session_state.agent_params = {
+                "product": sf_product, "region": sf_region, "speed": is_speed_mode
+            }
+
+        if not st.session_state.get("agent_ran") or \
+           st.session_state.agent_params.get("product") is None:
+            st.info("Select a product, delivery region and priority mode, then click **Run Smart Fulfillment Agent**.")
+            st.stop()
+
+        params_sf  = st.session_state.agent_params
+        sf_prod    = params_sf["product"]
+        sf_reg     = params_sf["region"]
+        sf_speed   = params_sf["speed"]
+        mode_label = "SPEED" if sf_speed else "COST"
+
+        st.markdown("---")
+        st.markdown("#### Running Agent...")
+
+        # ── STEP 2: Stock check across all nodes ──────────────────────────────
+        st.markdown('<div class="step-pill">⚙ Step 2 — Stock Check Across All Nodes</div>',
+                    unsafe_allow_html=True)
+
+        with st.spinner(f"Checking stock for '{sf_prod}' across all fulfillment nodes..."):
+            stock_df = run_query(f"""
+                SELECT
+                    i.WAREHOUSE_ID,
+                    i.WAREHOUSE_NAME,
+                    n.NODE_TYPE,
+                    n.CITY,
+                    n.REGION  AS NODE_REGION,
+                    n.LAT,
+                    n.LON,
+                    n.CONTACT_EMAIL,
+                    i.STOCK_QTY,
+                    i.REORDER_THRESHOLD,
+                    CASE WHEN i.STOCK_QTY <= i.REORDER_THRESHOLD THEN 'LOW_STOCK' ELSE 'IN_STOCK' END AS STOCK_STATUS,
+                    i.LAST_UPDATED
+                FROM OrderLens.RAW_VAULT.inventory_by_location i
+                INNER JOIN OrderLens.RAW_VAULT.fulfillment_nodes n
+                    ON i.WAREHOUSE_ID = n.WAREHOUSE_ID
+                WHERE i.IS_ACTIVE = 1
+                  AND n.IS_ACTIVE = 1
+                  AND i.PRODUCT_NAME = '{sf_prod.replace(chr(39), chr(39)+chr(39))}'
+                  AND i.STOCK_QTY > 0
+                ORDER BY i.STOCK_QTY DESC
+            """)
+
+        if stock_df.empty:
+            st.error(f"❌ No stock found for **{sf_prod}** at any active node. "
+                     "Check INVENTORY_BY_LOCATION table.")
+            st.stop()
+
+        st.success(f"✅ **{sf_prod}** is in stock at **{len(stock_df)}** node(s).")
+
+        disp_stock = stock_df[["WAREHOUSE_NAME","NODE_TYPE","CITY","NODE_REGION",
+                                "STOCK_QTY","REORDER_THRESHOLD","STOCK_STATUS"]].copy()
+        disp_stock.columns = ["Node","Type","City","Region","Stock Qty","Reorder Threshold","Status"]
+        st.dataframe(disp_stock, use_container_width=True, hide_index=True)
+
+        # ── STEP 3: Shipping options ───────────────────────────────────────────
+        st.markdown(f'<div class="step-pill">⚙ Step 3 — Routing Options to {sf_reg}</div>',
+                    unsafe_allow_html=True)
+
+        node_ids = "','".join(stock_df["WAREHOUSE_ID"].tolist())
+
+        with st.spinner(f"Fetching shipping options from all stocked nodes to {sf_reg}..."):
+            routes_df = run_query(f"""
+                SELECT
+                    s.FROM_NODE_ID,
+                    s.FROM_NODE_NAME,
+                    n.NODE_TYPE,
+                    n.CITY          AS FROM_CITY,
+                    i.STOCK_QTY,
+                    s.TO_REGION,
+                    s.TO_CITY,
+                    s.SHIPPING_COST,
+                    s.EST_DELIVERY_DAYS,
+                    s.CARRIER,
+                    s.SERVICE_TYPE,
+                    CASE s.EST_DELIVERY_DAYS
+                        WHEN 1 THEN 'Same/Next Day'
+                        WHEN 2 THEN '2-Day'
+                        WHEN 3 THEN '3-Day'
+                        ELSE CAST(s.EST_DELIVERY_DAYS AS VARCHAR) + '-Day'
+                    END AS SPEED_LABEL
+                FROM OrderLens.RAW_VAULT.shipping_cost_matrix s
+                INNER JOIN OrderLens.RAW_VAULT.fulfillment_nodes n
+                    ON s.FROM_NODE_ID = n.WAREHOUSE_ID
+                INNER JOIN OrderLens.RAW_VAULT.inventory_by_location i
+                    ON s.FROM_NODE_ID = i.WAREHOUSE_ID
+                    AND i.PRODUCT_NAME = '{sf_prod.replace(chr(39), chr(39)+chr(39))}'
+                    AND i.IS_ACTIVE = 1
+                    AND i.STOCK_QTY > 0
+                WHERE s.IS_ACTIVE = 1
+                  AND n.IS_ACTIVE = 1
+                  AND s.FROM_NODE_ID IN ('{node_ids}')
+                  AND s.TO_REGION = '{sf_reg.replace(chr(39), chr(39)+chr(39))}'
+                ORDER BY s.EST_DELIVERY_DAYS ASC, s.SHIPPING_COST ASC
+            """)
+
+        if routes_df.empty:
+            st.warning(
+                f"No shipping routes found from stocked nodes to **{sf_reg}**. "
+                f"Check SHIPPING_COST_MATRIX for routes to this region."
+            )
+            st.stop()
+
+        # ── STEP 4: Pick the winner ────────────────────────────────────────────
+        st.markdown('<div class="step-pill">⚙ Step 4 — Selecting Optimal Route</div>',
+                    unsafe_allow_html=True)
+
+        if sf_speed:
+            winner = routes_df.sort_values(
+                ["EST_DELIVERY_DAYS","SHIPPING_COST"], ascending=[True,True]
+            ).iloc[0]
+        else:
+            winner = routes_df.sort_values(
+                ["SHIPPING_COST","EST_DELIVERY_DAYS"], ascending=[True,True]
+            ).iloc[0]
+
+        w_node      = str(winner["FROM_NODE_NAME"])
+        w_type      = str(winner["NODE_TYPE"])
+        w_city      = str(winner["FROM_CITY"])
+        w_stock     = int(winner["STOCK_QTY"])
+        w_cost      = float(winner["SHIPPING_COST"])
+        w_days      = int(winner["EST_DELIVERY_DAYS"])
+        w_carrier   = str(winner["CARRIER"])
+        w_svc       = str(winner["SERVICE_TYPE"])
+        w_speed_lbl = str(winner["SPEED_LABEL"])
+        w_to_city   = str(winner["TO_CITY"]) if winner["TO_CITY"] else sf_reg
+
+        mode_color = "#0f766e" if sf_speed else "#1e40af"
+        mode_icon  = "⚡" if sf_speed else "💰"
+        mode_title = "FASTEST ROUTE" if sf_speed else "CHEAPEST ROUTE"
+
+        st.markdown(
+            f'<div style="background:linear-gradient(135deg,{mode_color},{mode_color}cc);'
+            f'border-radius:14px;padding:22px 28px;color:white;margin:12px 0;">'
+            f'<div style="font-size:11px;font-weight:800;opacity:.8;letter-spacing:1px;'
+            f'margin-bottom:8px;">{mode_icon} RECOMMENDED — {mode_title}</div>'
+            f'<div style="font-size:22px;font-weight:900;margin-bottom:4px;">'
+            f'{html.escape(w_node)}</div>'
+            f'<div style="font-size:14px;opacity:.9;">'
+            f'{html.escape(w_type)} · {html.escape(w_city)}</div>'
+            f'<div style="display:flex;gap:24px;margin-top:16px;flex-wrap:wrap;">'
+            f'<div><div style="font-size:11px;opacity:.7;">DELIVERY</div>'
+            f'<div style="font-size:20px;font-weight:900;">{w_speed_lbl}</div></div>'
+            f'<div><div style="font-size:11px;opacity:.7;">COST</div>'
+            f'<div style="font-size:20px;font-weight:900;">₹{w_cost:,.0f}</div></div>'
+            f'<div><div style="font-size:11px;opacity:.7;">CARRIER</div>'
+            f'<div style="font-size:20px;font-weight:900;">{html.escape(w_carrier)}</div></div>'
+            f'<div><div style="font-size:11px;opacity:.7;">SERVICE</div>'
+            f'<div style="font-size:20px;font-weight:900;">{html.escape(w_svc)}</div></div>'
+            f'<div><div style="font-size:11px;opacity:.7;">STOCK AT NODE</div>'
+            f'<div style="font-size:20px;font-weight:900;">{w_stock} units</div></div>'
+            f'</div></div>',
+            unsafe_allow_html=True
+        )
+
+        st.markdown("#### All Available Routes — Comparison")
+        st.caption(f"All nodes with **{sf_prod}** in stock that ship to **{sf_reg}**. "
+                   f"{'Sorted fastest first.' if sf_speed else 'Sorted cheapest first.'}")
+
+        disp_routes = routes_df.copy()
+        disp_routes["SHIPPING_COST"] = disp_routes["SHIPPING_COST"].apply(lambda v: f"₹{float(v):,.0f}")
+        disp_routes["STOCK_QTY"]     = disp_routes["STOCK_QTY"].apply(lambda v: f"{int(v)} units")
+        disp_routes = disp_routes[[
+            "FROM_NODE_NAME","NODE_TYPE","FROM_CITY","STOCK_QTY",
+            "SPEED_LABEL","EST_DELIVERY_DAYS","SHIPPING_COST","CARRIER","SERVICE_TYPE"
+        ]]
+        disp_routes.columns = [
+            "Node","Type","City","Stock",
+            "Delivery Speed","Days","Shipping Cost","Carrier","Service"
+        ]
+        st.dataframe(disp_routes, use_container_width=True, hide_index=True)
+
+        # ── STEP 5: AI Routing Explanation ────────────────────────────────────
+        st.markdown('<div class="step-pill">⚙ Step 5 — AI Routing Explanation</div>',
+                    unsafe_allow_html=True)
+
+        other_routes = routes_df[routes_df["FROM_NODE_NAME"] != w_node].head(3)
+        alt_summary  = "; ".join(
+            f"{r['FROM_NODE_NAME']} ({r['EST_DELIVERY_DAYS']}d, ₹{float(r['SHIPPING_COST']):,.0f})"
+            for _, r in other_routes.iterrows()
+        ) if not other_routes.empty else "No alternatives available"
+
+        _sf_ai_prompt = (
+            f"You are a logistics routing agent. Explain this routing decision clearly.\n\n"
+            f"ORDER DETAILS:\n"
+            f"- Product: {sf_prod}\n"
+            f"- Delivery to: {sf_reg} ({w_to_city})\n"
+            f"- Priority: {'Fastest delivery' if sf_speed else 'Lowest cost'}\n\n"
+            f"RECOMMENDED ROUTE:\n"
+            f"- Node: {w_node} ({w_type}, {w_city})\n"
+            f"- Delivery: {w_speed_lbl} ({w_days} days)\n"
+            f"- Shipping cost: ₹{w_cost:,.0f}\n"
+            f"- Carrier: {w_carrier} ({w_svc})\n"
+            f"- Stock available: {w_stock} units\n\n"
+            f"ALTERNATIVES CONSIDERED: {alt_summary}\n\n"
+            f"Write:\n"
+            f"1. Why this node was chosen (2 sentences — cite delivery days and cost vs alternatives)\n"
+            f"2. One risk to watch (stock level, carrier reliability, or distance)\n"
+            f"3. One action if this route fails (fallback option)\n"
+            f"Be direct, cite the numbers. No generic advice."
+        )
+
+        with st.spinner("Generating AI routing explanation..."):
+            try:
+                ai_routing = cortex_complete(_sf_ai_prompt, temperature=0.3)
+                if not isinstance(ai_routing, str):
+                    # cortex_complete may return a DataFrame in some versions
+                    ai_routing = str(ai_routing)
+            except Exception as _ai_err:
+                ai_routing = f"AI explanation unavailable: {_ai_err}"
+
+        _ai_r_html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', ai_routing)
+        _ai_r_html = html.escape(_ai_r_html).replace("&lt;strong&gt;","<strong>").replace("&lt;/strong&gt;","</strong>")
+        _ai_r_html = _ai_r_html.replace("\n","<br/>")
+        st.markdown(
+            f'<div style="background:#f0fdfa;border-left:4px solid #0f766e;border-radius:10px;'
+            f'padding:18px 20px;font-size:13px;line-height:1.85;">'
+            f'{_ai_r_html}</div>',
+            unsafe_allow_html=True
+        )
+
+        # ── STEP 6: Low stock alert ────────────────────────────────────────────
+        _reorder_thresh = int(winner["REORDER_THRESHOLD"]) if "REORDER_THRESHOLD" in winner.index and pd.notna(winner["REORDER_THRESHOLD"]) else 10
+        if w_stock <= _reorder_thresh:
+            st.warning(
+                f"⚠️ **Low stock alert:** {w_node} only has **{w_stock} units** of {sf_prod} "
+                f"— at or below reorder threshold. Consider restocking before routing more orders here.",
+                icon="⚠️"
+            )
+
+        # ── Export ─────────────────────────────────────────────────────────────
+        st.markdown("---")
+        ex_sf1, ex_sf2 = st.columns(2, gap="medium")
+
+        routing_summary = {
+            "Product":          sf_prod,
+            "Delivery Region":  sf_reg,
+            "Priority Mode":    mode_label,
+            "Recommended Node": w_node,
+            "Node Type":        w_type,
+            "Node City":        w_city,
+            "Delivery Speed":   w_speed_lbl,
+            "Delivery Days":    w_days,
+            "Shipping Cost":    f"₹{w_cost:,.0f}",
+            "Carrier":          w_carrier,
+            "Service Type":     w_svc,
+            "Stock at Node":    f"{w_stock} units",
+            "AI Explanation":   ai_routing,
+            "Generated At":     datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+
+        with ex_sf1:
+            all_routes_exp = routes_df.copy()
+            all_routes_exp["SHIPPING_COST"] = all_routes_exp["SHIPPING_COST"].apply(lambda v: f"₹{float(v):,.0f}")
+            all_routes_exp.columns = [c.replace("_"," ").title() for c in all_routes_exp.columns]
+            st.download_button(
+                "⬇ Download All Routes (CSV)",
+                data=all_routes_exp.to_csv(index=False),
+                file_name=f"fulfillment_routes_{sf_prod.replace(' ','_')}_{sf_reg}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                mime="text/csv", key="dl_sf_routes",
+                use_container_width=True
+            )
+
+        with ex_sf2:
+            report_txt = (
+                f"SMART FULFILLMENT AGENT — ROUTING REPORT\n"
+                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
+                f"{'='*55}\n\n"
+                + "\n".join(f"{k:<22}: {v}" for k, v in routing_summary.items() if k != "AI Explanation")
+                + f"\n\n{'='*55}\nAI ROUTING EXPLANATION:\n{'='*55}\n\n{ai_routing}"
+            )
+            st.download_button(
+                "⬇ Download Routing Report (TXT)",
+                data=report_txt,
+                file_name=f"routing_{sf_prod.replace(' ','_')}_{sf_reg}_{datetime.now().strftime('%Y%m%d_%H%M')}.txt",
+                mime="text/plain", key="dl_sf_report",
+                use_container_width=True
+            )
 
 # ================= ORDER LIFE CYCLE PAGE =================
 elif st.session_state.current_page == "Order Life Cycle":
