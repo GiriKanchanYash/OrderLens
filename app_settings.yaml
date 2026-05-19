@@ -85,9 +85,9 @@ metadata:
 # Shared across Microsoft Fabric, SQL generation, and YAML.
 # ---------------------------------------------------------------------------
 data_vault:
-  hub_prefix: "h_"
-  sat_prefix: "s_"
-  link_prefix: "l_"
+  hub_prefix: "HUB_"
+  sat_prefix: "SAT_"
+  link_prefix: "LNK_"
   bridge_prefix: "BRG_"
   pit_prefix: "PIT_"                      # Point-in-Time table prefix
   raw_vault_schema: "RAW_VAULT"
