@@ -57,61 +57,8 @@ except ImportError as e:
     st.stop()
 
 
-# Get DB session
-session = get_active_session()
-session_wh = _get_warehouse_session()
-
-if "startup_db_check_done" not in st.session_state:
-    st.session_state["startup_db_check_done"] = True
-
-    try:
-        # 🔌 DB connection check
-        session.sql("SELECT 1 AS probe").collect()
-
-        # 🏗 Warehouse setup (run once)
-        if "warehouse_setup_done" not in st.session_state:
-            try:
-                _setup_results = ensure_warehouse_tables()
-                st.session_state["warehouse_setup_done"] = True
-
-                _setup_errors = {
-                    k: v for k, v in _setup_results.items()
-                    if "error" in str(v).lower()
-                }
-
-                if _setup_errors:
-                    st.warning(
-                        f"Some warehouse tables could not be created: {_setup_errors}"
-                    )
-
-            except Exception as _setup_err:
-                st.warning(f"Warehouse setup warning (non-blocking): {_setup_err}")
-                st.session_state["warehouse_setup_done"] = True
-
-    except Exception as e:
-        err_str = str(e)
-
-        # ❌ Show DB error only when exception occurs
-        st.error("Database connection failed. Check the diagnostics below.")
-
-        if (
-            "Server is not found" in err_str
-            or "connection to ." in err_str
-            or "08001" in err_str
-        ):
-            st.markdown(
-                """
-                **Possible causes:**
-                - Database server is down
-                - Incorrect host or port
-                - Network/firewall blocking access
-                - Wrong connection string
-
-                Please verify your database configuration.
-                """
-            )
-        else:
-            st.markdown(f"**Error details:** `{err_str}`")
+# NOTE: DB session initialization moved to after st.set_page_config() to avoid SessionInfo not initialized error
+# This is critical for Azure deployments
 
 # Database configuration
 FILE = "schema_model.yaml"
