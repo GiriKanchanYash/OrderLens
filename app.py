@@ -3643,8 +3643,9 @@ if st.session_state.current_page == "Dashboard":
     orders_prev = int(
         orders_prev_df['COUNT'].iloc[0]) if not orders_prev_df.empty else 0
     aov_current = float(
-        aov_current_df['AOV'].iloc[0]) if not aov_current_df.empty else 0
-    aov_prev = float(aov_prev_df['AOV'].iloc[0]) if aov_prev_df['AOV'].iloc[0] is not None else 0.0 if not aov_prev_df.empty else 0
+        aov_current_df['AOV'].iloc[0]) if not aov_current_df.empty and aov_current_df['AOV'].iloc[0] is not None else 0
+    aov_prev = float(
+        aov_prev_df['AOV'].iloc[0]) if not aov_prev_df.empty and aov_prev_df['AOV'].iloc[0] is not None else 0
     dealers_current = int(
         dealers_current_df['COUNT'].iloc[0]) if not dealers_current_df.empty else 0
     dealers_prev = int(
@@ -3779,6 +3780,8 @@ if st.session_state.current_page == "Dashboard":
                     )
                     chart = (bars + labels).properties(height=300)
                     st.altair_chart(chart, use_container_width=True)
+                else:
+                    st.info("No sales data available for the selected period")
 
         with chart_col2:
             with st.container(border=True):
@@ -3922,6 +3925,8 @@ if st.session_state.current_page == "Dashboard":
                             ]
                         ).properties(height=250)
                         st.altair_chart(chart, use_container_width=True)
+                    else:
+                        st.info("No revenue data available for the selected period")
 
                 with trend_col2:
                     st.markdown(
@@ -3968,6 +3973,8 @@ if st.session_state.current_page == "Dashboard":
                             ]
                         ).properties(height=250)
                         st.altair_chart(chart, use_container_width=True)
+                    else:
+                        st.info("No order data available for the selected period")
             else:
                 # Weekly view for month or less
                 st.markdown(
@@ -4007,6 +4014,8 @@ if st.session_state.current_page == "Dashboard":
                             ]
                         ).properties(height=250)
                         st.altair_chart(chart, use_container_width=True)
+                    else:
+                        st.info("No revenue data available for the selected period")
 
                 with trend_col2:
                     st.markdown(
@@ -4040,6 +4049,8 @@ if st.session_state.current_page == "Dashboard":
                             ]
                         ).properties(height=250)
                         st.altair_chart(chart, use_container_width=True)
+                    else:
+                        st.info("No order data available for the selected period")
 
         # Product Category Performance (Full Width)
         st.markdown("<br>", unsafe_allow_html=True)
