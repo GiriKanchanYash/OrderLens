@@ -5691,7 +5691,7 @@ elif st.session_state.current_page == "AI Agents":
       border:1.5px solid #e5e7eb;
       border-radius:14px;
       padding:16px 16px 14px 16px;
-      height:260px;
+      height:auto;
       box-shadow:0 2px 8px rgba(2,8,23,.04);
       display:flex;
       flex-direction:column;
@@ -5715,12 +5715,8 @@ elif st.session_state.current_page == "AI Agents":
     .ai-icon-velocity{ background:linear-gradient(135deg,#7c3aed,#4f46e5); }
     .ai-icon-smart{ background:linear-gradient(135deg,#0ea5e9,#14b8a6); }
     .ai-card-title{ font-size:30px; font-weight:900; color:#0f172a; margin:0 0 10px 0; line-height:1.05; }
-    .ai-card-desc{ font-size:14px; color:#475569; line-height:1.55; margin:0; }
     .ai-card-desc{
-      display:-webkit-box;
-      -webkit-line-clamp:6;
-      -webkit-box-orient:vertical;
-      overflow:hidden;
+      font-size:14px; color:#475569; line-height:1.55; margin:0;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -5740,54 +5736,22 @@ elif st.session_state.current_page == "AI Agents":
         unsafe_allow_html=True
     )
 
-    c1, c2, c3 = st.columns(3, gap="medium")
-    with c1:
-        st.markdown("""
-        <div class="ai-card">
-          <div class="ai-icon ai-icon-drop">🔎</div>
-          <div class="ai-card-title">Order Drop-Off Agent</div>
-          <p class="ai-card-desc">
-            Finds every stuck ORDER ID in your pipeline right now. Shows exactly how many days each order has been sitting at
-            the same status, detects SLA breaches using expected vs actual delivery dates, and generates a per-order action list
-            your ops team can act on directly.
-          </p>
-        </div>
-        """, unsafe_allow_html=True)
-        st.button("Launch Order Drop-Off Agent",
-                  use_container_width=True, key="btn_launch_dropoff")
-
-    with c2:
-        st.markdown("""
-        <div class="ai-card">
-          <div class="ai-icon ai-icon-velocity">🧭</div>
-          <div class="ai-card-title">Order Velocity Agent</div>
-          <p class="ai-card-desc">
-            Finds specific dealer-product combinations that are overdue for reorder right now - based on each dealer's own
-            historical reorder cycle. Generates a proactive outreach task list with channel, message hook and urgency - before
-            revenue is lost.
-          </p>
-        </div>
-        """, unsafe_allow_html=True)
-        st.button("Launch Order Velocity Agent",
-                  use_container_width=True, key="btn_launch_velocity")
-
-    with c3:
-        st.markdown("""
-        <div class="ai-card">
-          <div class="ai-icon ai-icon-smart">🚚</div>
-          <div class="ai-card-title">Smart Fulfillment Agent</div>
-          <p class="ai-card-desc">
-            Optimises order routing across your warehouses, dark stores and retail outlets. For any product going to any region,
-            finds the fastest node (Speed mode) or the cheapest node (Cost mode) with full stock check, carrier, cost and
-            delivery-day breakdown.
-          </p>
-        </div>
-        """, unsafe_allow_html=True)
-        if st.button("Launch Smart Fulfillment Agent",
-                     use_container_width=True, key="btn_launch_smart"):
-            st.session_state.active_agent = "smart_fulfillment"
-            st.session_state.agent_ran    = False
-            st.rerun()
+    st.markdown("""
+    <div class="ai-card">
+      <div class="ai-icon ai-icon-smart">🚚</div>
+      <div class="ai-card-title">Smart Fulfillment Agent</div>
+      <p class="ai-card-desc">
+        Optimises order routing across your warehouses, dark stores and retail outlets. For any product going to any region,
+        finds the fastest node (Speed mode) or the cheapest node (Cost mode) with full stock check, carrier, cost and
+        delivery-day breakdown.
+      </p>
+    </div>
+    """, unsafe_allow_html=True)
+    if st.button("Launch Smart Fulfillment Agent",
+                 use_container_width=True, key="btn_launch_smart"):
+        st.session_state.active_agent = "smart_fulfillment"
+        st.session_state.agent_ran    = False
+        st.rerun()
 
     # ── Smart Fulfillment Agent panel ──────────────────────────────────────
     if st.session_state.get("active_agent") == "smart_fulfillment":
