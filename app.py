@@ -58,10 +58,22 @@ except ImportError as e:
 
 
 # Get DB session
-session = get_active_session()
-session_wh = _get_warehouse_session()
-
+# Initialize session state FIRST before any database calls
 if "startup_db_check_done" not in st.session_state:
+    st.session_state["startup_db_check_done"] = False
+
+if "warehouse_setup_done" not in st.session_state:
+    st.session_state["warehouse_setup_done"] = False
+
+# Now get database sessions
+try:
+    session = get_active_session()
+    session_wh = _get_warehouse_session()
+except Exception as db_init_err:
+    st.error(f"Database initialization failed: {db_init_err}")
+    st.stop()
+
+if st.session_state.get("startup_db_check_done") is False:
     st.session_state["startup_db_check_done"] = True
 
     try:
@@ -69,7 +81,7 @@ if "startup_db_check_done" not in st.session_state:
         session.sql("SELECT 1 AS probe").collect()
 
         # 🏗 Warehouse setup (run once)
-        if "warehouse_setup_done" not in st.session_state:
+        if st.session_state.get("warehouse_setup_done") is False:
             try:
                 _setup_results = ensure_warehouse_tables()
                 st.session_state["warehouse_setup_done"] = True
