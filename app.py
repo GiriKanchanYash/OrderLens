@@ -436,6 +436,9 @@ for _k, _v in _SS_DEFAULTS.items():
         st.session_state[_k] = _v
 if "saved_insights_open" not in st.session_state:
     st.session_state.saved_insights_open = False
+    
+if "show_upload" not in st.session_state:
+        st.session_state.show_upload = False
 
 # print("---- SESSION STATE DUMP ----")
 # for k, v in st.session_state.items():
@@ -1538,6 +1541,7 @@ def _load_queries_by_date(chat_date: str) -> list:
         st.warning(f"Could not load chat history for date {chat_date}: {e}")
         return []
 
+
 def _append_genie_question(query: str, analysis_type: str):
     q = query.strip()
     if not q:
@@ -1635,6 +1639,26 @@ def _save_insight(question: str, title: str, analysis_type: str = "custom", page
         st.caption("Traceback:")
         st.code(traceback.format_exc())
 
+def generate_context_for_uploaded_file(file_content: str) -> str:
+    prompt = f"""
+                You are analysing a previously saved chat between a user and an AI assistant. The chat is about procurement data analysis.
+                The user has uploaded the chat for you to review and provide insights on. The chat content is as follows:
+                {file_content}
+                Please review the chat and create a consise conversation memory that contains:
+                1. Main topics discussed
+                2. Key insights or conclusions reached
+                3. Any action items or recommendations mentioned
+                4. Overall sentiment of the conversation
+                5. Any other relevant context that would help you understand the user's needs and preferences based on this past conversation.
+                
+                Return a structure summary.
+            """
+        
+    try:
+        response = cortex_complete(prompt, temperature=0.2)
+        return (response or "").strip()
+    except Exception as e:
+        return f"Context generation failed: {str(e)}"
 
 def _get_saved_insights_for_user(n: int = 20, page: str = "genie", include_all_pages: bool = False,):
     """Return recent saved insights for the current user on a given page."""
@@ -1825,6 +1849,103 @@ def _extract_cortex_text(raw) -> str:
             pass
     return stripped
 
+
+def _cortex_complete_predictive(content: list, run_df_func, question: str) -> str:
+    """Generate predictive insights (forecasts & trends) using Azure OpenAI with middleware logging."""
+    
+    start_time = time.time()
+
+    data_parts = []
+    executed_sqls = []
+
+    for block in content or []:
+        if block.get("type") != "sql":
+            continue
+
+        sql = block.get("statement", "")
+        if not sql.strip():
+            continue
+
+        try:
+            df = run_df_func(sql)
+            executed_sqls.append(sql)
+
+            if df is None or df.empty:
+                continue
+
+            head = df.head(40)
+            data_parts.append(head.to_string(index=False, max_colwidth=40))
+
+        except Exception as e:
+            logger.warning(f"Failed to execute SQL block: {e}")
+            continue
+    
+    if not data_parts:
+        return ""
+    
+    data_str = "\n\n---\n\n".join(data_parts)
+
+    # Limit payload size
+    if len(data_str) > 15000:
+        data_str = data_str[:] + "\n(truncated)"
+    
+    prompt = (
+    "You are a procurement business analyst with forecasting expertise. "
+    "The user asked a question and received the following data from our analytics. "
+    "Analyze this historical data and provide predictive insights. "
+    "Your output must include: "
+    "1. Vendor-specific forecasts with **numeric projections** (e.g., counts for Q4 2024, Q1 2025). "
+    "2. **Scenario analysis**: best case, worst case, and most likely outcomes. "
+    "3. **Confidence ranges** (e.g., 70–80% likelihood). "
+    "4. Risks and opportunities tied directly to the metrics. "
+    "Format as a numbered list, each item on a NEW LINE (1. ...\\n2. ...\\n3. ...). "
+    "Bold ALL key predictions, numbers, and timeframes using ** (e.g., **increase 15%**, **Q2 2026**). "
+    "Do NOT use HTML tags. "
+    "Each numbered point must start on its own line.\n\n"
+    f"User question: {question}\n\n"
+    f"Historical Data:\n{data_str}"
+    )
+
+    
+    try:
+        result = cortex_complete(prompt, temperature=0.4)
+
+        duration = round(time.time() - start_time, 3)
+
+        if result and len(result.strip()) > 20:
+            result_clean = result.strip()
+
+            # 🔥 Middleware Logging (SUCCESS)
+            log_event("AI_PREDICTIVE", {
+                "summary": result_clean[:],
+                "full_answer": result_clean,
+                "sql": " | ".join(executed_sqls)[:],
+                "relevance": 0.95,
+                "details": f"LLM response time: {duration}s"
+            })
+
+            return result_clean
+
+        # 🔹 Edge case: empty/weak response
+        log_event("AI_EMPTY", {
+            "summary": "LLM returned empty/weak predictive response",
+            "details": f"Time: {duration}s",
+            "relevance": 0.2
+        })
+
+    except Exception as e:
+        duration = round(time.time() - start_time, 3)
+
+        # 🔥 Middleware Logging (ERROR)
+        log_event("AI_ERROR", {
+            "summary": "LLM predictive insights failed",
+            "details": f"{str(e)} | Time: {duration}s",
+            "relevance": 0.0
+        })
+
+        logger.error(f"Predictive insights failed: {e}")
+    
+    return ""
 
 def _cortex_complete_prescriptive(content: list, run_df_func, question: str) -> str:
     """Generate prescriptive insights using Azure OpenAI with middleware logging."""
@@ -5425,24 +5546,22 @@ elif st.session_state.current_page == "Genie":
                                 with st.expander("Prescriptive — Recommendations & Actions", expanded=False):
                                     st.markdown(
                                         f'<div class="prescriptive-content">{_pres_q}</div>', unsafe_allow_html=True)
-                            # Generate Predictive for quick analyses via Cortex
-                            _pred_cache_key_q = f"_pred_q_{abs(hash(_qtitle)) % 1_000_000}"
+                            # Generate Predictive for quick analyses via _cortex_complete_predictive
+                            _pred_cache_key_q = f"_pred_q_{abs(hash(_a_q.get('question', _qtitle))) % 1_000_000}"
                             if _pred_cache_key_q not in st.session_state:
-                                try:
-                                    _pred_prompt = (
-                                        f"Based on this S&O data analysis for '{_a_q.get('question', _qtitle)}', "
-                                        f"provide a brief 30-90 day predictive forecast. "
-                                        f"State 2-3 key assumptions, likely outcomes with numbers, "
-                                        f"and a confidence level (Low/Medium/High). Be concise (3-4 sentences)."
-                                        + (f"\n\nKey metrics: {str(_m)[:400]}" if _m else "")
-                                    )
-                                    _pred_df = cortex_complete(_pred_prompt)
-                                    _pred_q = (
-                                        _pred_df if not _pred_df.empty else "") or ""
-                                    st.session_state[_pred_cache_key_q] = _pred_q.strip() if len(
-                                        _pred_q.strip()) > 20 else ""
-                                except Exception:
-                                    st.session_state[_pred_cache_key_q] = ""
+                                # Quick-analysis responses store executed SQLs in _resp_inner["sql"];
+                                # build content blocks so _cortex_complete_predictive has data to run.
+                                _pred_content_q = [
+                                    {"type": "sql", "statement": _sq}
+                                    for _sq in (_resp_inner.get("sql") or {}).values()
+                                    if isinstance(_sq, str) and _sq.strip()
+                                ]
+                                _pred_q = _cortex_complete_predictive(
+                                    _pred_content_q,
+                                    run_df,
+                                    _a_q.get("question", _qtitle)
+                                )
+                                st.session_state[_pred_cache_key_q] = _pred_q or ""
                             _pred_q = st.session_state.get(
                                 _pred_cache_key_q, "")
                             if _pred_q:
@@ -5545,40 +5664,13 @@ elif st.session_state.current_page == "Genie":
                                         f'<div class="prescriptive-content">{_pres_r}</div>', unsafe_allow_html=True)
 
                         # ── Predictive expander ───────────────────────────────
-                        # Use parsed section OR generate via Cortex if missing
-                        _pred_cache_key_r = f"_pred_r_{abs(hash(_all_text_r[:100])) % 1_000_000}"
+                        # Use parsed section OR generate via _cortex_complete_predictive if missing
+                        _pred_cache_key_r = f"_pred_r_{abs(hash(_cur_question)) % 1_000_000}"
                         if not _pred_r:
                             if _pred_cache_key_r not in st.session_state:
-                                try:
-                                    # Collect SQL result DFs for context
-                                    _sql_dfs_r = []
-                                    for _blk_pred in _content_r:
-                                        if _blk_pred.get("type") == "sql":
-                                            try:
-                                                _pdf = run_df(
-                                                    _blk_pred.get("statement", ""))
-                                                if _pdf is not None and not _pdf.empty:
-                                                    _sql_dfs_r.append(_pdf.head(10).to_string(
-                                                        index=False, max_colwidth=40))
-                                            except Exception:
-                                                pass
-                                    _data_ctx = "\n\n".join(_sql_dfs_r)[
-                                        :6000] if _sql_dfs_r else ""
-                                    _pred_prompt_r = (
-                                        f"Based on this S&O analysis for the question: '{_cur_question}', "
-                                        f"provide a brief 30-90 day predictive forecast. "
-                                        f"State 2-3 key assumptions, likely outcomes with numbers, "
-                                        f"and a confidence level (Low/Medium/High). Be concise (3-4 sentences)."
-                                        + (f"\n\nData context:\n{_data_ctx}" if _data_ctx else "")
-                                    )
-                                    _pred_df_r = cortex_complete(
-                                        _pred_prompt_r, temperature=0.3)
-                                    _pred_gen = (
-                                        _pred_df_r if not _pred_df_r.empty else "") or ""
-                                    st.session_state[_pred_cache_key_r] = _pred_gen.strip() if len(
-                                        _pred_gen.strip()) > 20 else ""
-                                except Exception:
-                                    st.session_state[_pred_cache_key_r] = ""
+                                _pred_gen_r = _cortex_complete_predictive(
+                                    _content_r, run_df, _cur_question)
+                                st.session_state[_pred_cache_key_r] = _pred_gen_r or ""
                             _pred_r = st.session_state.get(
                                 _pred_cache_key_r, "")
 
@@ -5638,7 +5730,13 @@ elif st.session_state.current_page == "Genie":
             st.markdown("<div style='height:20px;'></div>",
                         unsafe_allow_html=True)
             with st.form("genie_question_form", clear_on_submit=True):
-                input_col, btn_col = st.columns([0.88, 0.12])
+                col_plus,input_col, btn_col = st.columns([0.12,0.76, 0.12])
+                
+                # ➕ Button (toggle upload panel)
+                with col_plus:
+                    plus_clicked = st.form_submit_button("➕",
+                                    help="Upload a previous chat or analysis"
+                                            )
                 with input_col:
                     user_query = st.text_input(
                         "Ask a question",
@@ -5648,6 +5746,117 @@ elif st.session_state.current_page == "Genie":
                     )
                 with btn_col:
                     send_clicked = st.form_submit_button("→")
+                    
+            # ✅ Toggle upload panel
+            if plus_clicked:
+                st.session_state.show_upload = not st.session_state.show_upload
+
+
+            # -------------------------
+            # ✅ Upload Panel (Markdown file with previous chat or analysis)
+            # -------------------------
+            if st.session_state.show_upload:
+                with st.container():
+                    uploaded_file = st.file_uploader(
+                        "Choose file to upload",
+                        type=["md"],
+                        key="chat_md_upload"
+                    )
+
+                    if uploaded_file is not None:
+                        md_content = uploaded_file.read().decode("utf-8")
+
+                        # ✅ Store raw content
+                        st.session_state.loaded_md_content = md_content
+
+                        # ✅ Optional: parse into chat history
+                        lines = md_content.split("\n")
+                        parsed_chat = []
+                        
+                        for line in lines:
+                            if line.startswith("Chat History — AI Summary"):
+                                parsed_chat.append({
+                                    "Type": "Chat History",
+                                    "content": line.replace("User:", "").strip()
+                                })
+                            elif line.startswith("Queries"):
+                                parsed_chat.append({
+                                    "Type": "Date Wise",
+                                    "content": line.replace("AI:", "").strip()
+                                })
+                        print(f"Parsed chat history: {parsed_chat}")
+
+                        if parsed_chat:
+                            st.session_state.loaded_chat_history = parsed_chat
+                        
+                        converstaion_context = generate_context_for_uploaded_file(md_content)
+                        st.session_state.upload_chat_context = converstaion_context
+                        st.session_state.conversation_resumed = True
+                        st.success("✅ Chat uploaded successfully! Context generated below.")
+                        print(f"Generated conversation context: {converstaion_context}")
+
+                    # ── Show context card + action buttons inline (always visible while panel is open) ──
+                    if st.session_state.get("upload_chat_context"):
+                        _ctx = st.session_state.upload_chat_context
+                        st.markdown(f"""
+                        <div style='padding:16px;background:#e0f2fe;border-radius:12px;
+                                    border-left:4px solid #0284c7;margin-top:12px;margin-bottom:4px;'>
+                            <div style='font-size:13px;font-weight:800;color:#0369a1;margin-bottom:8px;'>
+                                📋 Conversation Context Loaded
+                            </div>
+                            <div style='color:#0f172a;font-size:13px;line-height:1.6;
+                                        word-wrap:break-word;overflow-wrap:break-word;max-width:100%;'>
+                                {_ctx}
+                            </div>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        # FIX 2 — Resume Chat: show active-banner + close panel so user can type
+                        _col_res, _col_clr = st.columns(2, gap="small")
+                        with _col_res:
+                            if st.button("🔄 Resume Chat", use_container_width=True, key="btn_resume_context"):
+                                st.session_state.use_uploaded_context = True
+                                st.session_state.show_upload = False          # close panel
+                                st.session_state.context_active_banner = True  # show inline banner
+                                st.rerun()
+                        with _col_clr:
+                            if st.button("✕ Clear Context", use_container_width=True, key="btn_clear_context"):
+                                st.session_state.upload_chat_context = None
+                                st.session_state.loaded_md_content = None
+                                st.session_state.show_upload = False
+                                st.session_state.context_active_banner = False
+                                st.rerun()
+
+            # ── Context-active banner: shown BELOW input when Resume Chat was clicked ──
+            if st.session_state.get("context_active_banner") and st.session_state.get("use_uploaded_context"):
+                banner = st.container()
+                with banner:
+                    col1, col2 = st.columns([6, 1.5])  # adjust ratio for spacing
+
+                    with col1:
+                        st.markdown(
+                            """
+                            <div style='display:flex;align-items:center;gap:10px;padding:10px 16px;
+                                        background:#f0fdf4;border-radius:10px;border:1px solid #86efac;
+                                        margin-bottom:8px;'>
+                                <span style='font-size:16px;'>✅</span>
+                                <span style='font-size:13px;color:#166534;font-weight:600;'>
+                                    Context is active — your next question will include the uploaded conversation history.
+                                </span>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
+                        )
+
+                    with col2:
+                        if st.button("✕ Clear Context"):
+                            st.session_state.upload_chat_context = None
+                            st.session_state.loaded_md_content = None
+                            st.session_state.show_upload = False
+                            st.session_state.context_active_banner = False
+                            st.session_state.use_uploaded_context = False
+                            st.rerun()
+
 
             if send_clicked and user_query:
                 if st.session_state.get("show_loaded_chat_history", False):
@@ -6897,4 +7106,3 @@ elif st.session_state.current_page == "Forecast":
                 st.altair_chart(chart, use_container_width=True)
             else:
                 st.info("No revenue share data available")
-#end of the code
