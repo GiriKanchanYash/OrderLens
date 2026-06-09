@@ -5065,7 +5065,7 @@ elif st.session_state.current_page == "Genie":
                 else:
                     for i, item in enumerate(conv_dates[:10]):
                         chat_date = item.get("ChatDate")
-                        freq = int(item.get("count", 0))
+                        # freq = int(item.get("count", 0))
                         last_msg = item.get("last_message_at", "")
 
                         # compute human-friendly time-ago
@@ -5094,7 +5094,7 @@ elif st.session_state.current_page == "Genie":
                             _time_ago = ""
 
                         title = f"Chat on {chat_date}"
-                        sub = f"{freq} message{'s' if freq != 1 else ''} · {_time_ago}" if _time_ago else f"{freq} message{'s' if freq != 1 else ''}"
+                        sub = f"{_time_ago}" if _time_ago else f"Last message: {last_msg}"
 
                         # Render a single clickable button per conversation (title + meta)
                         btn_label = f"{title} — {sub}"
