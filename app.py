@@ -5052,12 +5052,69 @@ elif st.session_state.current_page == "Genie":
                     st.caption(
                         "Ask questions to see most frequent across all users.")
 
+            # ── Previous conversations (by date) ──────────────────────────
+            st.markdown("<div style='height:6px;'></div>", unsafe_allow_html=True)
+            with st.expander("Previous conversations", expanded=False):
+                try:
+                    conv_dates = _load_user_chat_dates()
+                except Exception:
+                    conv_dates = []
+
+                if not conv_dates:
+                    st.markdown('<div style="font-size:12px;color:#94a3b8;text-align:center;padding:8px 0;">No previous conversations found.</div>', unsafe_allow_html=True)
+                else:
+                    for i, item in enumerate(conv_dates[:10]):
+                        chat_date = item.get("ChatDate")
+                        freq = int(item.get("count", 0))
+                        last_msg = item.get("last_message_at", "")
+
+                        # compute human-friendly time-ago
+                        _time_ago = ""
+                        try:
+                            if last_msg and str(last_msg) not in ("", "None", "nan"):
+                                try:
+                                    _dt = datetime.fromisoformat(str(last_msg).strip())
+                                except ValueError:
+                                    _dt = datetime.strptime(str(last_msg).strip()[:19], "%Y-%m-%d %H:%M:%S")
+                            else:
+                                _dt = datetime.strptime(str(chat_date).strip()[:10], "%Y-%m-%d")
+                            _now = datetime.now()
+                            _mins = int((_now - _dt).total_seconds() // 60)
+                            if _mins < 1:
+                                _time_ago = "just now"
+                            elif _mins < 60:
+                                _time_ago = f"{_mins}m ago"
+                            elif _mins < 1440:
+                                _time_ago = f"{_mins//60}h ago"
+                            elif _mins < 2880:
+                                _time_ago = "1 day ago"
+                            else:
+                                _time_ago = f"{_mins//1440} days ago"
+                        except Exception:
+                            _time_ago = ""
+
+                        title = f"Chat on {chat_date}"
+                        sub = f"{freq} message{'s' if freq != 1 else ''} · {_time_ago}" if _time_ago else f"{freq} message{'s' if freq != 1 else ''}"
+
+                        # Render a single clickable button per conversation (title + meta)
+                        btn_label = f"{title} — {sub}"
+                        if st.button(btn_label, key=f"open_conv_{i}", use_container_width=True, type="secondary"):
+                            with st.spinner("Loading conversation..."):
+                                qs = _load_queries_by_date(chat_date)
+                                if qs:
+                                    st.session_state["loaded_chat_date"] = chat_date
+                                    st.session_state["loaded_chat_history"] = qs
+                                    st.session_state["show_loaded_chat_history"] = True
+                                else:
+                                    st.warning(f"No chat history found for {chat_date}")
+                            st.rerun()
+
     # RIGHT COLUMN: AI Assistant
     with right_col:
         with st.container(border=True):
 
             # Header row with title and buttons
-            header_col, btn1, btn2, btn3, btn4 = st.columns([2, 1, 1, 1, 1], gap="small")
+            header_col, btn2, btn3, btn4 = st.columns([2, 1, 1, 1], gap="small")
             
             with header_col:
                 st.markdown(
@@ -5067,10 +5124,6 @@ elif st.session_state.current_page == "Genie":
                     unsafe_allow_html=True,
                 )
             
-            with btn1:
-                if st.button("Chats", use_container_width=True, key="btn_chats"):
-                    st.session_state.show_conversation_history = True
-                    st.rerun()
             with btn2:
                 if st.button("Sumarize", use_container_width=True, key="btn_summarize"):
                     session_qs = st.session_state.get("genie_queries", [])
@@ -5213,7 +5266,7 @@ elif st.session_state.current_page == "Genie":
                     st.markdown(chat_bubbles_html, unsafe_allow_html=True)
                     st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
 
-            # Show resume conversation section only when NOT viewing chat history
+             # Show resume conversation section only when NOT viewing chat history
             else:
                 # Blue background section
                 st.markdown(
@@ -5225,109 +5278,6 @@ elif st.session_state.current_page == "Genie":
                     """,
                     unsafe_allow_html=True,
                 )
-
-                # Show conversation history or empty state
-                if st.session_state.get("show_conversation_history", True):
-                    # Returns list of {"query": ..., "count": ...}
-                    ChatDate = _load_user_chat_dates()
-
-                    if not ChatDate:
-                        st.info("No query history found for your account.")
-                    else:
-                        # Render each query as a card
-                        for i, item in enumerate(ChatDate[:]):  # Show up to 6 cards
-                            chat_date = item["ChatDate"]
-                            freq = item.get("count", 0)
-
-                            # Calculate how long ago this chat was
-                            # Prefer real timestamp (last_message_at) for accuracy;
-                            # fall back to ChatDate (midnight) if not available.
-                            try:
-                                _last_msg = item.get("last_message_at", "")
-                                if _last_msg and str(_last_msg) not in ("", "None", "nan"):
-                                    try:
-                                        _chat_dt = datetime.fromisoformat(str(_last_msg).strip())
-                                    except ValueError:
-                                        _chat_dt = datetime.strptime(str(_last_msg).strip()[:19], "%Y-%m-%d %H:%M:%S")
-                                else:
-                                    # Fallback: use ChatDate at midnight (less precise)
-                                    _chat_dt = datetime.strptime(str(chat_date).strip()[:10], "%Y-%m-%d")
-                                _now = datetime.now()
-                                _diff_minutes = int((_now - _chat_dt).total_seconds() // 60)
-                                _diff_hours = _diff_minutes // 60
-                                if _diff_minutes < 1:
-                                    _time_ago = "just now"
-                                elif _diff_minutes < 60:
-                                    _time_ago = f"{_diff_minutes}m ago"
-                                elif _diff_hours < 24:
-                                    _time_ago = f"{_diff_hours}h ago"
-                                elif _diff_hours < 48:
-                                    _time_ago = "1 day ago"
-                                else:
-                                    _diff_days = _diff_hours // 24
-                                    _time_ago = f"{_diff_days} days ago"
-                            except Exception:
-                                _time_ago = ""
-
-                            # Native Streamlit card - no raw HTML to avoid escaping issues
-                            _is_active = (
-                                st.session_state.get("show_loaded_chat_history", False)
-                                and st.session_state.get("loaded_chat_date") == chat_date
-                            )
-                            _msg_label = str(freq) + " message" + ("s" if freq != 1 else "") + ("  ·  " + _time_ago if _time_ago else "")
-                            _display_title = f"Chat on {chat_date}"
-                            card_col1, card_col2 = st.columns([4.4, 1.6], gap="small")
-                            with card_col1:
-                                _border_style = (
-                                    "border:2px solid #16a34a;border-radius:10px;padding:12px 16px;background:#f0fdf4;"
-                                    if _is_active else
-                                    "border:1px solid #E5E7EB;border-radius:10px;padding:12px 16px;background:#FFFFFF;"
-                                )
-                                if _is_active:
-                                    _active_badge = '<span style="background:#16a34a;color:#fff;border-radius:5px;padding:2px 8px;font-size:11px;font-weight:700;margin-left:8px;">Active</span>'
-                                    st.markdown(
-                                        f'<div style="{_border_style}">'
-                                        f'<div style="font-size:14px;font-weight:700;color:#0F172A;margin-bottom:4px;">{_display_title}{_active_badge}</div>'
-                                        f'<div style="font-size:12px;color:#6B7280;">{_msg_label}</div>'
-                                        f'</div>',
-                                        unsafe_allow_html=True
-                                    )
-                                else:
-                                    st.markdown(
-                                        f'<div style="{_border_style}">'
-                                        f'<div style="font-size:14px;font-weight:700;color:#0F172A;margin-bottom:4px;">{_display_title}</div>'
-                                        f'<div style="font-size:12px;color:#6B7280;">{_msg_label}</div>'
-                                        f'</div>',
-                                        unsafe_allow_html=True
-                                    )
-                            with card_col2:
-                                st.write("")
-                                if not _is_active:
-                                    if st.button("Resume", key=f"resume_query_{i}", use_container_width=True, type="primary"):
-                                        with st.spinner("Loading chat history..."):
-                                            chat_queries = _load_queries_by_date(chat_date)
-                                            if chat_queries:
-                                                st.session_state["loaded_chat_date"] = chat_date
-                                                st.session_state["loaded_chat_history"] = chat_queries
-                                                st.session_state["show_loaded_chat_history"] = True
-                                            else:
-                                                st.warning(f"No chat history found for {chat_date}")
-                                        st.rerun()
-                            st.write("")
-                else:
-                    # Empty state - Start a Conversation
-                    st.markdown(
-                        """
-                        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px; text-align: center;">
-                            <div style="width: 80px; height: 80px; background-color: #DBEAFE; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 20px;">
-                                <span style="font-size: 40px; color: #93C5FD;">+</span>
-                            </div>
-                            <h2 style="font-size: 20px; font-weight: 800; color: #0F172A; margin: 0 0 12px 0;">Start a Conversation</h2>
-                            <p style="font-size: 14px; color: #64748B; margin: 0; max-width: 300px;">Ask questions about your Sales and Operations data, or select a quick analysis above.</p>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
 
             st.markdown("<div style='height: 4px;'></div>", unsafe_allow_html=True)
 
