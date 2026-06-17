@@ -1651,6 +1651,8 @@ def generate_context_for_uploaded_file(file_content: str) -> str:
                 4. Overall sentiment of the conversation
                 5. Any other relevant context that would help you understand the user's needs and preferences based on this past conversation.
                 
+                Rule:
+                Max 250 words
                 Return a structure summary.
             """
         
@@ -3306,8 +3308,18 @@ def process_genie_query(query: str, analysis_type: str = "custom") -> dict:
                 _conv_history.append({"role": "analyst", "content": [
                                      {"type": "text", "text": _a}]})
 
+        # ── Uploaded chat context: fold into the question itself so it actually
+        # influences the answer (conversation_history below is structural only).
+        _uploaded_ctx = st.session_state.get("upload_chat_context")
+        _query_for_analyst = query
+        if st.session_state.get("use_uploaded_context") and _uploaded_ctx:
+            _query_for_analyst = (
+                "Context from a previously uploaded conversation (use this as background "
+                f"when relevant):\n{_uploaded_ctx}\n\nCurrent question:\n{query}"
+            )
+
         response = call_cortex_analyst(
-            query, conversation_history=_conv_history or None)
+            _query_for_analyst, conversation_history=_conv_history or None)
 
         # Write to cache
         if _cache and not response.get("error") and not _is_contextual:
@@ -5676,8 +5688,50 @@ elif st.session_state.current_page == "Genie":
             # Auto-scroll JS
             st.markdown(_build_autoscroll_js(), unsafe_allow_html=True)
 
+            # ── Context status strip — sits directly above the chat box ─────────
+            # Shows "generating" while the AI builds the summary, then the
+            # active-context banner once it's ready. No manual "Resume" step:
+            # uploading a file is enough to make the context active.
+            if st.session_state.get("context_generating"):
+                st.markdown(
+                    """
+                    <div style='display:flex;align-items:center;gap:10px;padding:10px 16px;
+                                background:#eef4ff;border-radius:10px;border:1px solid #bfdbfe;
+                                margin-bottom:8px;'>
+                        <span style='font-size:16px;'>⏳</span>
+                        <span style='font-size:13px;color:#1d4ed8;font-weight:600;'>
+                            Generating context from your uploaded chat…
+                        </span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+            elif st.session_state.get("use_uploaded_context") and st.session_state.get("upload_chat_context"):
+                _ctx_col1, _ctx_col2 = st.columns([6, 1.5])
+                with _ctx_col1:
+                    st.markdown(
+                        """
+                        <div style='display:flex;align-items:center;gap:10px;padding:10px 16px;
+                                    background:#f0fdf4;border-radius:10px;border:1px solid #86efac;
+                                    margin-bottom:8px;'>
+                            <span style='font-size:16px;'>✅</span>
+                            <span style='font-size:13px;color:#166534;font-weight:600;'>
+                                Context is active — your next question will include the uploaded conversation history.
+                            </span>
+                        </div>
+                        """,
+                        unsafe_allow_html=True
+                    )
+                with _ctx_col2:
+                    if st.button("✕ Clear Context", key="btn_clear_context_top", use_container_width=True):
+                        st.session_state.upload_chat_context = None
+                        st.session_state.loaded_md_content = None
+                        st.session_state.use_uploaded_context = False
+                        st.session_state.show_upload = False
+                        st.rerun()
+
             # ── Chat Input ────────────────────────────────────────────────────
-            st.markdown("<div style='height:20px;'></div>",
+            st.markdown("<div style='height:8px;'></div>",
                         unsafe_allow_html=True)
             with st.form("genie_question_form", clear_on_submit=True):
                 col_plus,input_col, btn_col = st.columns([0.12,0.76, 0.12])
@@ -5713,7 +5767,8 @@ elif st.session_state.current_page == "Genie":
                         key="chat_md_upload"
                     )
 
-                    if uploaded_file is not None:
+                    if uploaded_file is not None and uploaded_file.file_id != st.session_state.get("_last_uploaded_chat_file_id"):
+                        st.session_state._last_uploaded_chat_file_id = uploaded_file.file_id
                         md_content = uploaded_file.read().decode("utf-8")
 
                         # ✅ Store raw content
@@ -5738,73 +5793,43 @@ elif st.session_state.current_page == "Genie":
 
                         if parsed_chat:
                             st.session_state.loaded_chat_history = parsed_chat
-                        
-                        converstaion_context = generate_context_for_uploaded_file(md_content)
+
+                        # Flag the "generating" state and rerun immediately so the status
+                        # strip above the chat box actually renders it on its own frame,
+                        # then do the (blocking) generation call on the next run.
+                        st.session_state.context_generating = True
+                        st.session_state._pending_context_md = md_content
+                        st.rerun()
+
+                    # ── If a generation was queued on a previous run, do the actual
+                    # (blocking) AI call now — the "generating" strip above the chat
+                    # box was already shown to the user on the run that queued this.
+                    if st.session_state.get("context_generating") and st.session_state.get("_pending_context_md"):
+                        _pending_md = st.session_state.pop("_pending_context_md")
+                        converstaion_context = generate_context_for_uploaded_file(_pending_md)
+                        st.session_state.context_generating = False
                         st.session_state.upload_chat_context = converstaion_context
                         st.session_state.conversation_resumed = True
-                        st.success("✅ Chat uploaded successfully! Context generated below.")
+                        # Context is active the moment it's generated — no extra click needed.
+                        st.session_state.use_uploaded_context = True
                         print(f"Generated conversation context: {converstaion_context}")
+                        st.rerun()
 
-                    # ── Show context card + action buttons inline (always visible while panel is open) ──
+                    # ── Loaded-context preview + clear action (kept inside the panel) ──
                     if st.session_state.get("upload_chat_context"):
-                        _ctx = st.session_state.upload_chat_context
-                        st.markdown(f"""
-                        <div style='padding:16px;background:#e0f2fe;border-radius:12px;
-                                    border-left:4px solid #0284c7;margin-top:12px;margin-bottom:4px;'>
-                            <div style='font-size:13px;font-weight:800;color:#0369a1;margin-bottom:8px;'>
-                                📋 Conversation Context Loaded
-                            </div>
-                            <div style='color:#0f172a;font-size:13px;line-height:1.6;
-                                        word-wrap:break-word;overflow-wrap:break-word;max-width:100%;'>
-                                {_ctx}
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        with st.expander("📋 Uploaded context (preview)", expanded=False):
+                            st.markdown(
+                                f"<div style='color:#0f172a;font-size:13px;line-height:1.6;"
+                                f"word-wrap:break-word;overflow-wrap:break-word;max-width:100%;'>"
+                                f"{st.session_state.upload_chat_context}</div>",
+                                unsafe_allow_html=True
+                            )
 
-                        # FIX 2 — Resume Chat: show active-banner + close panel so user can type
-                        _col_res, _col_clr = st.columns(2, gap="small")
-                        with _col_res:
-                            if st.button("🔄 Resume Chat", use_container_width=True, key="btn_resume_context"):
-                                st.session_state.use_uploaded_context = True
-                                st.session_state.show_upload = False          # close panel
-                                st.session_state.context_active_banner = True  # show inline banner
-                                st.rerun()
-                        with _col_clr:
-                            if st.button("✕ Clear Context", use_container_width=True, key="btn_clear_context"):
-                                st.session_state.upload_chat_context = None
-                                st.session_state.loaded_md_content = None
-                                st.session_state.show_upload = False
-                                st.session_state.context_active_banner = False
-                                st.rerun()
-
-            # ── Context-active banner: shown BELOW input when Resume Chat was clicked ──
-            if st.session_state.get("context_active_banner") and st.session_state.get("use_uploaded_context"):
-                banner = st.container()
-                with banner:
-                    col1, col2 = st.columns([6, 1.5])  # adjust ratio for spacing
-
-                    with col1:
-                        st.markdown(
-                            """
-                            <div style='display:flex;align-items:center;gap:10px;padding:10px 16px;
-                                        background:#f0fdf4;border-radius:10px;border:1px solid #86efac;
-                                        margin-bottom:8px;'>
-                                <span style='font-size:16px;'>✅</span>
-                                <span style='font-size:13px;color:#166534;font-weight:600;'>
-                                    Context is active — your next question will include the uploaded conversation history.
-                                </span>
-                            </div>
-                            """,
-                            unsafe_allow_html=True
-                        )
-
-                    with col2:
-                        if st.button("✕ Clear Context"):
+                        if st.button("✕ Clear Context", use_container_width=True, key="btn_clear_context"):
                             st.session_state.upload_chat_context = None
                             st.session_state.loaded_md_content = None
-                            st.session_state.show_upload = False
-                            st.session_state.context_active_banner = False
                             st.session_state.use_uploaded_context = False
+                            st.session_state.show_upload = False
                             st.rerun()
 
 
