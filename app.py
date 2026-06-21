@@ -3558,20 +3558,38 @@ if st.session_state.current_page == "Dashboard":
                 unsafe_allow_html=True)
 
     # Date and Filter Controls
+
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 📅 DATE AND FILTER CONTROLS - YTD AS DEFAULT
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
     TODAY = date.today()
     MIN_DATE = date(2024, 1, 1)
-
+    
+    # ✅ INITIALIZE SESSION STATE WITH YTD AS DEFAULT
     if "time_filter" not in st.session_state:
-        st.session_state.time_filter = "YTD"
+        st.session_state.time_filter = "YTD"  # YTD is the default filter
+        
     if "start_date" not in st.session_state:
+        # Default to Jan 1 of current year for YTD
         st.session_state.start_date = date(TODAY.year, 1, 1)
+        
     if "end_date" not in st.session_state:
+        # Default to today
         st.session_state.end_date = TODAY
 
-    # Filter Row
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 🎨 FILTER ROW LAYOUT
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
     filter_col1, filter_col2, filter_spacer, time_col1, time_col2, time_col3, time_col4 = st.columns([
-                                                                                                     2, 1.5, 2, 1, 0.7, 0.7, 0.8])
+        2, 1.5, 2, 1, 0.7, 0.7, 0.8
+    ])
 
+    # ─────────────────────────────────────────────────────────────────────
+    # DATE RANGE PICKER
+    # ─────────────────────────────────────────────────────────────────────
+    
     with filter_col1:
         date_range = st.date_input(
             "Date Range",
@@ -3590,15 +3608,15 @@ if st.session_state.current_page == "Dashboard":
                 # Update dates first
                 st.session_state.start_date, st.session_state.end_date = new_start, new_end
 
-                # Check if it matches any preset
-                is_last_30 = (new_start == TODAY -
-                              timedelta(days=30) and new_end == TODAY)
+                # Check if selected dates match any preset filter
+                is_last_30 = (new_start == TODAY - timedelta(days=30) and new_end == TODAY)
+                
                 quarter_start_month = ((TODAY.month - 1) // 3) * 3 + 1
-                is_qtd = (new_start == date(
-                    TODAY.year, quarter_start_month, 1) and new_end == TODAY)
-                is_ytd = (new_start == date(TODAY.year, 1, 1)
-                          and new_end == TODAY)
+                is_qtd = (new_start == date(TODAY.year, quarter_start_month, 1) and new_end == TODAY)
+                
+                is_ytd = (new_start == date(TODAY.year, 1, 1) and new_end == TODAY)
 
+                # Determine which filter name to use
                 if is_last_30:
                     new_filter = "Last 30 Days"
                 elif is_qtd:
@@ -3617,6 +3635,10 @@ if st.session_state.current_page == "Dashboard":
                 # Dates didn't change, but ensure they're set
                 st.session_state.start_date, st.session_state.end_date = date_range
 
+    # ─────────────────────────────────────────────────────────────────────
+    # DEALER FILTER DROPDOWN
+    # ─────────────────────────────────────────────────────────────────────
+    
     with filter_col2:
         # Fetch dealers who have orders in the selected date range
         dealers_df = run_query(f"""
@@ -3640,6 +3662,11 @@ if st.session_state.current_page == "Dashboard":
         dealer_filter_clause = ""
         dealer_filter_clause_f = ""
 
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # ⏱️  QUICK FILTER BUTTONS - YTD IS HIGHLIGHTED BY DEFAULT
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    # Last 30 Days Button
     with time_col1:
         if st.button("Last 30 Days", key="t30",
                      type="primary" if st.session_state.time_filter == "Last 30 Days" else "secondary",
@@ -3649,17 +3676,18 @@ if st.session_state.current_page == "Dashboard":
             st.session_state.end_date = TODAY
             st.rerun()
 
+    # QTD (Quarter-To-Date) Button
     with time_col2:
         if st.button("QTD", key="tqtd",
                      type="primary" if st.session_state.time_filter == "QTD" else "secondary",
                      use_container_width=True):
             st.session_state.time_filter = "QTD"
             quarter_start_month = ((TODAY.month - 1) // 3) * 3 + 1
-            st.session_state.start_date = date(
-                TODAY.year, quarter_start_month, 1)
+            st.session_state.start_date = date(TODAY.year, quarter_start_month, 1)
             st.session_state.end_date = TODAY
             st.rerun()
 
+    # YTD (Year-To-Date) Button - DEFAULT SELECTION ✅
     with time_col3:
         if st.button("YTD", key="tytd",
                      type="primary" if st.session_state.time_filter == "YTD" else "secondary",
@@ -3669,12 +3697,17 @@ if st.session_state.current_page == "Dashboard":
             st.session_state.end_date = TODAY
             st.rerun()
 
+    # Custom Date Range Button
     with time_col4:
         if st.button("Custom", key="tcustom",
                      type="primary" if st.session_state.time_filter == "Custom" else "secondary",
                      use_container_width=True):
             st.session_state.time_filter = "Custom"
 
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    # 📊 APPLY FILTERS TO QUERIES
+    # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
     start_date = st.session_state.start_date
     end_date = st.session_state.end_date
     date_filter = f"EFFECTIVE_DATE BETWEEN '{start_date}' AND '{end_date}'"
