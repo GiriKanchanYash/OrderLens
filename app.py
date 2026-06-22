@@ -484,13 +484,16 @@ def load_clean_ui_light():
     .stApp{
       background: var(--bg) !important;
     }
-        /* Keep app content centered at 80% of viewport width */
-        .block-container{
-          padding-top: 8px;
-          width: 80vw;
-          max-width: 80vw;
-          margin-left: auto;
-          margin-right: auto;
+        /* Center the main block and keep consistent width to match design mock */
+        .block-container{ padding-top: 8px; max-width:1180px; margin-left:auto; margin-right:auto; }
+        /* Responsive expansion for very wide screens */
+        @media (min-width: 1400px) {
+            .block-container{ max-width:1320px; }
+            .p2p-header{ max-width:1320px; }
+        }
+        @media (min-width: 1600px) {
+            .block-container{ max-width:1480px; }
+            .p2p-header{ max-width:1480px; }
         }
 
     /* Branding bar (sticky) */
@@ -732,7 +735,7 @@ def load_clean_ui_light():
     .stColumns { gap: 12px !important; }
     .stContainer { padding: 10px 0 !important; }
     .kpi{ min-height:98px; padding:12px; }
-    .p2p-header{ width:80vw; max-width:80vw; margin-left:auto; margin-right:auto; }
+    .p2p-header{ max-width:1180px; margin-left:auto; margin-right:auto; }
 
     /* ========== GENIE PAGE STYLES ========== */
 
